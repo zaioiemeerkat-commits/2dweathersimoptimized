@@ -142,10 +142,11 @@ async function getSoundingGraphImgUrl(url)
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     const img = doc.querySelectorAll('img')[0];
-    if (!img)
+    const imageSrc = img && img.getAttribute('src');
+    if (!imageSrc)
       throw new Error('Sounding graph image was not found in the response');
 
-    return 'https://www.meteociel.fr/' + img.getAttribute('src');
+    return new URL(imageSrc, 'https://www.meteociel.fr/').href;
   } catch (error) {
     console.error('Error fetching the data:', error);
     return null;
@@ -199,18 +200,20 @@ async function scrapeTableData(url)
   }
 }
 
-async function loadSounding(stationID, timeStamp)
+async function loadSounding(stationID, timeStamp, requestId)
 {
 
   const imgMapType = 1; // 0 = large classic emagram   1 = small emagram
   const graphPageUrl = 'https://www.meteociel.fr/cartes_obs/sondage_display.php?id=' + stationID + '&map=' + imgMapType + '&date=' + timeStamp;
   const tablePageUrl = 'https://www.meteociel.fr/cartes_obs/sondage_display.php?id=' + stationID + '&map=4&date=' + timeStamp;
 
-  const SoundingGraphImgUrl = await getSoundingGraphImgUrl(graphPageUrl);
+  const soundingGraphImgUrl = await getSoundingGraphImgUrl(graphPageUrl);
+  if (requestId !== soundingRequestId)
+    return null;
 
   const soundingImgEl = document.getElementById('soundingPreview');
-  if (SoundingGraphImgUrl)
-    soundingImgEl.src = SoundingGraphImgUrl;
+  if (soundingGraphImgUrl)
+    soundingImgEl.src = soundingGraphImgUrl;
   else
     soundingImgEl.removeAttribute('src');
 
@@ -293,18 +296,24 @@ function createPresetSelect()
   select.value = -1;
 
   select.onchange = function() {
-    let preset = presets[select.selectedIndex];
+    const presetIndex = Number(select.value);
+    if (select.value === '' || !Number.isInteger(presetIndex))
+      return;
+    const preset = presets[presetIndex];
+    if (!preset)
+      return;
+    const station = soundingStations[preset.location];
+    if (!station)
+      throw new Error(`Unknown sounding station in preset: ${preset.location}`);
 
     document.getElementById('datePicker').value = preset.date;
 
-    startDate = new Date(preset.date);
+    startDate = new Date(preset.date + 'T00:00:00');
 
     document.getElementById('hourSelector').value = preset.hour;
 
-    stationSelector.selectedIndex = Object.keys(soundingStations).indexOf(preset.location);
+    stationSelector.value = station.id;
     stationSelector.dispatchEvent(new Event('change', {bubbles : true}));
-
-    prepareSounding();
   };
 }
 
@@ -381,13 +390,16 @@ function createStationSelect()
   select.value = 10868;
 
   select.onchange = function() {
-    startLatitude = Object.values(soundingStations)[select.selectedIndex].lat;
+    const station = Object.values(soundingStations)[select.selectedIndex];
+    if (!station)
+      throw new Error('The selected sounding station is not available.');
+    startLatitude = station.lat;
     prepareSounding();
   };
 
   let datePicker = document.getElementById('datePicker');
   datePicker.onchange = function() {
-    startDate = new Date(datePicker.value);
+    startDate = datePicker.value ? new Date(datePicker.value + 'T00:00:00') : null;
     prepareSounding();
   };
 
@@ -693,8 +705,12 @@ function download(filename, data)
   element.setAttribute('download', filename);
   element.style.display = 'none';
   document.body.appendChild(element);
-  element.click();
-  document.body.removeChild(element);
+  try {
+    element.click();
+  } finally {
+    element.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 
 // Universal Functions
@@ -2148,19 +2164,35 @@ async function setLoadingBar(task)
 }
 
 var soundingData;
+var soundingRequestId = 0;
 
 async function prepareSounding()
 {
+  const requestId = ++soundingRequestId;
   const dateSel = document.getElementById('datePicker');
   const date = new Date(dateSel.value);
+  const station = stationSelector.options[stationSelector.selectedIndex];
+  if (!dateSel.value || !Number.isFinite(date.getTime()) || !station) {
+    soundingData = [];
+    document.getElementById('soundingPreview').removeAttribute('src');
+    return;
+  }
+
   let epochTime = Math.floor(date.getTime() / 1000);
 
   const hourSelector = document.getElementById('hourSelector');
-  const hour = hourSelector.options[hourSelector.selectedIndex].value;
+  const hour = Number(hourSelector.value);
+  if (!Number.isFinite(hour)) {
+    soundingData = [];
+    document.getElementById('soundingPreview').removeAttribute('src');
+    return;
+  }
 
   epochTime += hour * 3600;
 
-  soundingData = await loadSounding(stationSelector.options[stationSelector.selectedIndex].value, epochTime);
+  const nextSoundingData = await loadSounding(station.value, epochTime, requestId);
+  if (requestId === soundingRequestId && nextSoundingData !== null)
+    soundingData = nextSoundingData;
 }
 
 async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initialRainDrops)
