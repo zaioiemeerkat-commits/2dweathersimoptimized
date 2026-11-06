@@ -262,7 +262,7 @@ Pako: Only used for data compression to reduce save file sizes. Size reduction c
 
 This project is a static site and can be deployed directly from GitHub Pages. The workflow in `.github/workflows/pages.yml` publishes the repository root whenever code is pushed to `main` or `master`, and can also be started manually from the repository's Actions tab.
 
-For `zaioiemeerkat-commits/2dweathersimoptimized`, push this project to that repository, then set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. After the workflow succeeds, the site will be available at:
+For `zaioiemeerkat-commits/2dweathersimoptimized`, push this project to that repository. The deployment workflow enables GitHub Pages and publishes the repository root. After the workflow succeeds, the site will be available at:
 
 https://zaioiemeerkat-commits.github.io/2dweathersimoptimized/
 
