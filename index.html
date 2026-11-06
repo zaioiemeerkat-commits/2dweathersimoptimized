@@ -1263,6 +1263,32 @@
             text-align: center;
         }
 
+        .main-menu-intro {
+            display: grid;
+            gap: 6px;
+            justify-items: center;
+        }
+
+        .main-menu-credit {
+            color: rgba(255, 255, 255, 0.72);
+            font: 400 12px/1.5 "Plus Jakarta Sans", sans-serif;
+            margin: 0;
+            text-align: center;
+        }
+
+        .main-menu-credit a {
+            color: inherit;
+            text-decoration-color: rgba(255, 255, 255, 0.45);
+            text-underline-offset: 2px;
+            transition: color 160ms ease, text-decoration-color 160ms ease;
+        }
+
+        .main-menu-credit a:hover,
+        .main-menu-credit a:focus-visible {
+            color: #fff;
+            text-decoration-color: currentColor;
+        }
+
         .main-menu-actions {
             display: flex;
             gap: clamp(32px, 7vw, 76px);
@@ -1551,7 +1577,10 @@
     <div id="IntroScreen">
         <div class="main-menu-content" id="mainMenuContent">
             <section class="main-menu-choice" id="mainMenuChoice">
-            <p class="main-menu-prompt">Create a new simulation or load an existing one?</p>
+            <div class="main-menu-intro">
+                <p class="main-menu-prompt">Create a new simulation or load an existing one?</p>
+                <p class="main-menu-credit">Thanks to <a href="https://niels747.github.io/2D-Weather-Sandbox/" target="_blank" rel="noopener noreferrer">Niels Daemen</a> for the original simulation.</p>
+            </div>
             <div class="main-menu-actions">
                 <div class="main-menu-action-wrap">
                     <button class="main-menu-action" type="button" aria-label="Create a new simulation"
