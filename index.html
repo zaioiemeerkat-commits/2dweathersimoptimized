@@ -554,37 +554,47 @@
             background: rgba(18, 25, 35, 0.82);
             border: 1px solid rgba(255, 255, 255, 0.22);
             border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-        }
-
-        .dg.ac .dg.main.taller-than-window {
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
             max-height: calc(100vh - 8px);
             overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
         }
 
         @supports (height: 100dvh) {
-            .dg.ac .dg.main.taller-than-window {
+            .dg.ac .dg.main {
                 max-height: calc(100dvh - 8px);
             }
         }
 
-        .dg.ac .dg.main.taller-than-window > ul {
-            flex: 1 1 auto;
+        .dg.ac .dg.main > ul {
+            flex: 0 1 auto;
             height: auto !important;
             min-height: 0;
             overflow-x: hidden;
             overflow-y: auto;
         }
 
-        .dg.ac .dg.main.taller-than-window > .close-button.close-bottom {
+        .dg.ac .dg.main > .close-button.close-bottom {
             flex: 0 0 auto;
             position: relative;
             width: 100% !important;
             z-index: 1003;
+        }
+
+        .app-version {
+            background: rgba(8, 12, 18, 0.48);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 6px;
+            bottom: 10px;
+            color: rgba(255, 255, 255, 0.78);
+            font: 500 11px/1 "Plus Jakarta Sans", sans-serif;
+            left: 10px;
+            padding: 5px 7px;
+            pointer-events: none;
+            position: fixed;
+            z-index: 1000;
         }
 
         @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -1922,6 +1932,7 @@
     <canvas id="mainCanvas">
         Your browser does not support HTML5, you must be using a really old browser!
     </canvas>
+    <div class="app-version" aria-label="Version 1.0">V1.0</div>
 </body>
 
 </html>
