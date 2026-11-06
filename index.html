@@ -559,7 +559,21 @@
         }
 
         .dg.ac .dg.main.taller-than-window {
+            box-sizing: border-box;
+            max-height: calc(100vh - 8px);
             overflow-y: auto;
+        }
+
+        @supports (height: 100dvh) {
+            .dg.ac .dg.main.taller-than-window {
+                max-height: calc(100dvh - 8px);
+            }
+        }
+
+        .dg.ac .dg.main.taller-than-window > .close-button.close-bottom {
+            bottom: 0;
+            position: sticky;
+            z-index: 1003;
         }
 
         @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
