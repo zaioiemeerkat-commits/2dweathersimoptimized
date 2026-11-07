@@ -6,6 +6,8 @@ This projects aims to produce a semirealistic two-dimensional, realtime, interac
 
 The simulation requires a browser with WebGL2 and `EXT_color_buffer_float`; open it through a local web server rather than `file://`. Firefox performance depends on hardware acceleration being available. In Firefox, check the Graphics section of `about:support` if rendering is unexpectedly slow or WebGL is unavailable.
 
+Audio assets use MP3 for broad Web Audio decoding support and load on demand, so unused sounds do not delay startup. Ambient sound-field samples use asynchronous GPU readback and update at most ten times per second.
+
 The fluid solver bounds sounding-profile lookups at the bottom of the grid and sanitizes non-finite or runaway state values between update passes. These safeguards are intended to prevent a single unstable cell from corrupting the wider simulation; they only intervene outside broad physical ranges and do not replace the model's simplified physics.
 
 The realistic display renders its HDR scene at 75% of the window dimensions and bloom at 50%, reducing their respective pixel workloads by about 44% and 75%. Thunder detection reads its GPU result once per rendered frame instead of synchronously after every simulation step. Startup fetches shader and image files concurrently; lightning artwork is generated in the background by at most two workers, at half the former dimensions, and transferred as image bitmaps instead of copied pixel arrays. Its aspect ratio and relative line width are preserved. The weather simulation grid, timestep, precipitation, and measurements remain unchanged; the upscaled image may look slightly softer.

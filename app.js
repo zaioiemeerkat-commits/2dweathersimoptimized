@@ -1073,7 +1073,7 @@ function createTemporalHistoryTexture()
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, canvas.width, canvas.height, 0, gl.RGB, gl.UNSIGNED_BYTE, null);
   temporalHistoryValid = false;
 }
 
@@ -2717,8 +2717,18 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     audioCtx;
     jetEngineSound;
 
-    thunderCCSounds = [];
-    thunderCGSounds = [];
+    #soundBufferPromises = new Map();
+    #ambientSoundLoads = new Set();
+    #ambientSoundLevels = new Map();
+    #ambientWallReadbackBuffer = null;
+    #ambientWeatherReadbackBuffer = null;
+    #ambientReadbackSync = null;
+    #ambientReadbackSample = null;
+    #ambientReadbackWallValues = new Int8Array(800);
+    #ambientReadbackBaseValues = new Float32Array(4);
+    #ambientReadbackWaterValues = new Float32Array(4);
+    #lastAmbientReadbackRequest = 0;
+    #ambientSoundRevision = 0;
 
     urban_sound;
     forest_sound;
@@ -2731,32 +2741,57 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     {
       this.audioCtx = new window.AudioContext();
       this.jetEngineSound = new JetEngineSoundGenerator(this.audioCtx);
-      // load sound files asynchronously
-      this.loadThunderSounds('cc', 13).then(buffers => { this.thunderCCSounds = buffers; });
-      this.loadThunderSounds('cg', 13).then(buffers => { this.thunderCGSounds = buffers; });
-
-      this.loadSound('urban.m4a').then(buffer => { this.urban_sound = this.playLoop(buffer, 0.0); });
-      this.loadSound('forest.mp3').then(buffer => { this.forest_sound = this.playLoop(buffer, 0.0); });
-      this.loadSound('beach.mp3').then(buffer => { this.beach_sound = this.playLoop(buffer, 0.0); });
-      this.loadSound('rain.m4a').then(buffer => { this.rain_sound = this.playLoop(buffer, 0.0); });
-      this.loadSound('wind.m4a').then(buffer => { this.wind_sound = this.playLoop(buffer, 0.0); });
     }
 
-    async loadSound(url)
+    loadSound(url)
     {
-      const resp = await fetch('resources/sounds/' + url);
-      const arrayBuffer = await resp.arrayBuffer();
-      return await this.audioCtx.decodeAudioData(arrayBuffer);
-    }
-
-    async loadThunderSounds(name, num)
-    {
-      const soundPromises = [];
-      for (let i = 1; i <= num; i++) {
-        const filename = name + `${i}.m4a`;
-        soundPromises.push(this.loadSound(filename));
+      if (!this.#soundBufferPromises.has(url)) {
+        const soundPromise = (async() => {
+          const response = await fetch('resources/sounds/' + url);
+          if (!response.ok)
+            throw new Error(`Sound request failed with HTTP ${response.status}: ${url}`);
+          const arrayBuffer = await response.arrayBuffer();
+          return await this.audioCtx.decodeAudioData(arrayBuffer);
+        })().catch(error => {
+          console.error(`Unable to load sound "${url}".`, error);
+          return null;
+        });
+        this.#soundBufferPromises.set(url, soundPromise);
       }
-      return await Promise.all(soundPromises);
+      return this.#soundBufferPromises.get(url);
+    }
+
+    setAmbientSoundGainAndPan(property, filename, gain, pan = 0.0)
+    {
+      const level = {
+        gain : Number.isFinite(gain) ? gain : 0,
+        pan : Number.isFinite(pan) ? pan : 0
+      };
+      this.#ambientSoundLevels.set(property, level);
+
+      if (this[property]) {
+        this.setSoundGainAndPan(this[property], level.gain, level.pan);
+        return;
+      }
+
+      if (level.gain <= 0 || this.#ambientSoundLoads.has(property))
+        return;
+
+      this.#ambientSoundLoads.add(property);
+      this.loadSound(filename).then(buffer => {
+        if (!buffer)
+          return;
+        this[property] = this.playLoop(buffer, 0.0);
+        const latestLevel = this.#ambientSoundLevels.get(property);
+        this.setSoundGainAndPan(this[property], latestLevel.gain, latestLevel.pan);
+      });
+    }
+
+    setAmbientSoundLeftRight(property, filename, left, right)
+    {
+      const gain = Math.max(left, right);
+      const pan = gain > 0 ? (right - left) / gain : 0;
+      this.setAmbientSoundGainAndPan(property, filename, gain, pan);
     }
 
     soundThunder(x, y, intensity)
@@ -2782,9 +2817,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
       soundDelay /= simTimeMult;
 
-      let soundArray = intensity > 1.0 ? this.thunderCGSounds : this.thunderCCSounds;
-      let randomThunderSound = soundArray[Math.floor(Math.random() * soundArray.length)];
-      this.playOnce(randomThunderSound, intensity / (distance * 0.001), leftRightBalance, soundDelay);
+      const soundType = intensity > 1.0 ? 'cg' : 'cc';
+      const soundNumber = Math.floor(Math.random() * 13) + 1;
+      this.loadSound(`${soundType}${soundNumber}.mp3`).then(buffer => {
+        if (buffer)
+          this.playOnce(buffer, intensity / (distance * 0.001), leftRightBalance, soundDelay);
+      });
     }
 
     playOnce(buffer, volume = 1, leftRightBalance = 0, delay = 0)
@@ -2816,95 +2854,48 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     updateAmbientSound(Xpos, Ypos, zoom)
     {
-      let camDistFromSim = cellHeight * sim_res_x * 0.5 / zoom; // asuming 90° HFOV
+      this.#pollAmbientSoundReadback();
 
-      if (camDistFromSim < 5000) {
-
-        const sampleWidth = Math.floor(clamp(camDistFromSim / cellHeight * 3, 30, 200)); // sample just a litte wider than the fov
+      const now = performance.now();
+      const camDistFromSim = cellHeight * sim_res_x * 0.5 / zoom; // assuming 90° HFOV
+      if (!this.#ambientReadbackSync && camDistFromSim < 5000 &&
+          now - this.#lastAmbientReadbackRequest >= 100) {
+        const sampleWidth = Math.floor(clamp(camDistFromSim / cellHeight * 3, 30, 200));
         const sampleWidth_2 = Math.floor(sampleWidth / 2);
-        const sampleWidth_3 = Math.floor(sampleWidth / 3);
-
-        let simXpos = Math.floor((-Xpos + 1) * 0.5 * sim_res_x);
-        let simYpos = clamp(Math.floor((-Ypos * sim_aspect + 1) * 0.5 * sim_res_y), 0, sim_res_y - 1);
-
+        const simXpos = Math.floor((-Xpos + 1) * 0.5 * sim_res_x);
+        const simYpos = clamp(Math.floor((-Ypos * sim_aspect + 1) * 0.5 * sim_res_y), 0, sim_res_y - 1);
+        if (!this.#ambientWallReadbackBuffer) {
+          this.#ambientWallReadbackBuffer = gl.createBuffer();
+          if (!this.#ambientWallReadbackBuffer)
+            throw new Error('Unable to allocate ambient-audio surface readback buffer.');
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.#ambientWallReadbackBuffer);
+          gl.bufferData(gl.PIXEL_PACK_BUFFER, this.#ambientReadbackWallValues.byteLength, gl.STREAM_READ);
+          gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        }
         gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_0);
-        gl.readBuffer(gl.COLOR_ATTACHMENT2); // walltexture
-        var wallTextureValues = new Int8Array(4 * sampleWidth);
-        gl.readPixels(simXpos - sampleWidth_2, simYpos, sampleWidth, 1, gl.RGBA_INTEGER, gl.BYTE, wallTextureValues);
-
-        let cellsAboveSurface = wallTextureValues[sampleWidth_2 * 4 + 2];
-
-        let camHeightAboveSurface = cellsAboveSurface * cellHeight;
-
-        let vecCamToSurface = new Vec2D(camDistFromSim, camHeightAboveSurface);
-
-        let distanceToSurface = vecCamToSurface.mag();
-
-        let forest = new Vec2D();
-        let beach = new Vec2D();
-        let urban = new Vec2D();
-
-        let distVolumeMult = map_range_C(1.0 / (clamp(distanceToSurface, 1000, 5000) / 1000.0), 0.2, 1.0, 0.0, 1.0); // multiplier based on camera distance to surface
-
-        for (let i = 0; i < sampleWidth; i++) {
-
-          let Lgain = clamp((sampleWidth_3 - Math.abs(i - sampleWidth_3)) / (sampleWidth_3 * sampleWidth_3), 0., 1.);
-          let Rgain = clamp((sampleWidth_3 - Math.abs(i - sampleWidth_3 * 2)) / (sampleWidth_3 * sampleWidth_3), 0., 1.);
-          let gain = new Vec2D(Lgain, Rgain);
-
-          if (wallTextureValues[i * 4 + 0] == 1) { // land vegetation
-            let vegetationNorm = wallTextureValues[i * 4 + 3] / 127.0;
-            forest.add(gain.mult(vegetationNorm));
-          } else if (wallTextureValues[i * 4 + 0] == 2) {                                      // water
-            beach.add(gain);
-          } else if (wallTextureValues[i * 4 + 0] == 4 || wallTextureValues[i * 4 + 0] == 6) { // urban or industrial
-            urban.add(gain);
-          }
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.#ambientWallReadbackBuffer);
+        gl.readBuffer(gl.COLOR_ATTACHMENT2);
+        gl.readPixels(simXpos - sampleWidth_2, simYpos, sampleWidth, 1, gl.RGBA_INTEGER, gl.BYTE, 0);
+        const readbackSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        if (!readbackSync) {
+          gl.deleteBuffer(this.#ambientWallReadbackBuffer);
+          this.#ambientWallReadbackBuffer = null;
+          throw new Error('Unable to synchronize ambient-audio pixel readback.');
         }
 
-        forest.mult(distVolumeMult * 0.15);
-        beach.mult(distVolumeMult * 1.0);
-        urban.mult(distVolumeMult * 1.0);
-
-        this.setSoundLeftRight(this.forest_sound, forest.x, forest.y);
-        this.setSoundLeftRight(this.beach_sound, beach.x, beach.y);
-        this.setSoundLeftRight(this.urban_sound, urban.x, urban.y);
-
-        // wind sound
-        gl.readBuffer(gl.COLOR_ATTACHMENT0); // basetexture
-        var baseTextureValues = new Float32Array(4);
-        let justAboveSurfaceCellY = simYpos - cellsAboveSurface + 3;
-        gl.readPixels(simXpos, justAboveSurfaceCellY, 1, 1, gl.RGBA, gl.FLOAT, baseTextureValues); // read single cell at mouse position
-
-        let windVolume = Math.abs(baseTextureValues[0]) * 10.0;
-
-        windVolume *= distVolumeMult;
-
-        this.setSoundGainAndPan(this.wind_sound, windVolume);
-
-        let tempC = KtoC(potentialToRealT(baseTextureValues[3], justAboveSurfaceCellY));
-
-        // rain sound
-
-        let rainVolume = 0;
-
-        if (tempC > 0) {
-
-          gl.readBuffer(gl.COLOR_ATTACHMENT1); // watertexture
-          var waterTextureValues = new Float32Array(4);
-
-          gl.readPixels(simXpos, justAboveSurfaceCellY, 1, 1, gl.RGBA, gl.FLOAT, waterTextureValues);
-
-          rainVolume = Math.pow(waterTextureValues[2] * 0.5, 0.5);
-
-          rainVolume *= map_range_C(tempC, 0., 3., 0., 1.); // rain sound fades as temperature approaches 0 (wet snow)
-
-          rainVolume *= distVolumeMult;
-        }
-
-        this.setSoundGainAndPan(this.rain_sound, rainVolume);
-
-        //    console.log(distVolumeMult, rainVolume, windVolume);
+        this.#ambientReadbackSync = readbackSync;
+        this.#ambientReadbackSample = {
+          sampleWidth,
+          sampleWidth_2,
+          camDistFromSim,
+          simXpos,
+          simYpos,
+          soundRevision : this.#ambientSoundRevision,
+          stage : 'wall'
+        };
+        this.#lastAmbientReadbackRequest = now;
       }
 
       if (airplaneMode) {
@@ -2923,15 +2914,131 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
     }
 
-    setSoundLeftRight(sound, L, R)
+    #pollAmbientSoundReadback()
     {
-      let gain = Math.max(L, R);
-      if (gain == 0) {
-        this.setSoundGainAndPan(sound, 0, 0);
+      if (!this.#ambientReadbackSync)
+        return;
+
+      const status = gl.clientWaitSync(this.#ambientReadbackSync, 0, 0);
+      if (status == gl.WAIT_FAILED) {
+        this.#cancelAmbientSoundReadback();
+        throw new Error('Unable to wait for ambient-audio pixel readback.');
+      }
+      if (status != gl.ALREADY_SIGNALED && status != gl.CONDITION_SATISFIED)
+        return;
+
+      const sample = this.#ambientReadbackSample;
+      gl.deleteSync(this.#ambientReadbackSync);
+      this.#ambientReadbackSync = null;
+
+      if (sample.stage == 'wall') {
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.#ambientWallReadbackBuffer);
+        gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.#ambientReadbackWallValues);
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        gl.deleteBuffer(this.#ambientWallReadbackBuffer);
+        this.#ambientWallReadbackBuffer = null;
+        sample.justAboveSurfaceCellY = clamp(
+          sample.simYpos - this.#ambientReadbackWallValues[sample.sampleWidth_2 * 4 + 2] + 3,
+          0,
+          sim_res_y - 1
+        );
+        this.#ambientWeatherReadbackBuffer = gl.createBuffer();
+        if (!this.#ambientWeatherReadbackBuffer)
+          throw new Error('Unable to allocate ambient-audio weather readback buffer.');
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.#ambientWeatherReadbackBuffer);
+        gl.bufferData(gl.PIXEL_PACK_BUFFER, Float32Array.BYTES_PER_ELEMENT * 8, gl.STREAM_READ);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_0);
+        gl.readBuffer(gl.COLOR_ATTACHMENT0);
+        gl.readPixels(sample.simXpos, sample.justAboveSurfaceCellY, 1, 1, gl.RGBA, gl.FLOAT, 0);
+        gl.readBuffer(gl.COLOR_ATTACHMENT1);
+        gl.readPixels(sample.simXpos, sample.justAboveSurfaceCellY, 1, 1, gl.RGBA, gl.FLOAT, 16);
+        this.#ambientReadbackSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+        gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+        if (!this.#ambientReadbackSync) {
+          gl.deleteBuffer(this.#ambientWeatherReadbackBuffer);
+          this.#ambientWeatherReadbackBuffer = null;
+          throw new Error('Unable to synchronize ambient-audio weather readback.');
+        }
+        sample.stage = 'weather';
         return;
       }
-      let pan = (R - L) / gain;
-      this.setSoundGainAndPan(sound, gain, pan);
+
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, this.#ambientWeatherReadbackBuffer);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, this.#ambientReadbackBaseValues);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 16, this.#ambientReadbackWaterValues);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      gl.deleteBuffer(this.#ambientWeatherReadbackBuffer);
+      this.#ambientWeatherReadbackBuffer = null;
+      this.#ambientReadbackSample = null;
+      this.#applyAmbientSoundSample(sample);
+    }
+
+    #cancelAmbientSoundReadback()
+    {
+      if (this.#ambientReadbackSync)
+        gl.deleteSync(this.#ambientReadbackSync);
+      if (this.#ambientWallReadbackBuffer)
+        gl.deleteBuffer(this.#ambientWallReadbackBuffer);
+      if (this.#ambientWeatherReadbackBuffer)
+        gl.deleteBuffer(this.#ambientWeatherReadbackBuffer);
+      this.#ambientReadbackSync = null;
+      this.#ambientWallReadbackBuffer = null;
+      this.#ambientWeatherReadbackBuffer = null;
+      this.#ambientReadbackSample = null;
+    }
+
+    #applyAmbientSoundSample(sample)
+    {
+      if (sample.soundRevision != this.#ambientSoundRevision || !guiControls.sound || guiControls.paused)
+        return;
+
+      const {sampleWidth, sampleWidth_2, camDistFromSim, justAboveSurfaceCellY} = sample;
+      const cellsAboveSurface = this.#ambientReadbackWallValues[sampleWidth_2 * 4 + 2];
+      const camHeightAboveSurface = cellsAboveSurface * cellHeight;
+      const distanceToSurface = new Vec2D(camDistFromSim, camHeightAboveSurface).mag();
+      const distVolumeMult = map_range_C(
+        1.0 / (clamp(distanceToSurface, 1000, 5000) / 1000.0), 0.2, 1.0, 0.0, 1.0
+      );
+      const sampleWidth_3 = Math.floor(sampleWidth / 3);
+      const forest = new Vec2D();
+      const beach = new Vec2D();
+      const urban = new Vec2D();
+
+      for (let i = 0; i < sampleWidth; i++) {
+        const leftGain = clamp((sampleWidth_3 - Math.abs(i - sampleWidth_3)) / (sampleWidth_3 * sampleWidth_3), 0., 1.);
+        const rightGain = clamp((sampleWidth_3 - Math.abs(i - sampleWidth_3 * 2)) / (sampleWidth_3 * sampleWidth_3), 0., 1.);
+        const gain = new Vec2D(leftGain, rightGain);
+
+        if (this.#ambientReadbackWallValues[i * 4] == 1) {
+          const vegetationNorm = this.#ambientReadbackWallValues[i * 4 + 3] / 127.0;
+          forest.add(gain.mult(vegetationNorm));
+        } else if (this.#ambientReadbackWallValues[i * 4] == 2) {
+          beach.add(gain);
+        } else if (this.#ambientReadbackWallValues[i * 4] == 4 || this.#ambientReadbackWallValues[i * 4] == 6) {
+          urban.add(gain);
+        }
+      }
+
+      forest.mult(distVolumeMult * 0.15);
+      beach.mult(distVolumeMult);
+      urban.mult(distVolumeMult);
+      this.setAmbientSoundLeftRight('forest_sound', 'forest.mp3', forest.x, forest.y);
+      this.setAmbientSoundLeftRight('beach_sound', 'beach.mp3', beach.x, beach.y);
+      this.setAmbientSoundLeftRight('urban_sound', 'urban.mp3', urban.x, urban.y);
+
+      const baseTextureValues = this.#ambientReadbackBaseValues;
+      const windVolume = Math.abs(baseTextureValues[0]) * 10.0 * distVolumeMult;
+      this.setAmbientSoundGainAndPan('wind_sound', 'wind.mp3', windVolume);
+
+      const tempC = KtoC(potentialToRealT(baseTextureValues[3], justAboveSurfaceCellY));
+      let rainVolume = 0;
+      if (tempC > 0) {
+        rainVolume = Math.pow(this.#ambientReadbackWaterValues[2] * 0.5, 0.5);
+        rainVolume *= map_range_C(tempC, 0., 3., 0., 1.);
+        rainVolume *= distVolumeMult;
+      }
+      this.setAmbientSoundGainAndPan('rain_sound', 'rain.mp3', rainVolume);
     }
 
     setSoundGainAndPan(sound, gain, pan = 0.0)
@@ -2945,11 +3052,13 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     mute()
     {
-      this.setSoundGainAndPan(this.forest_sound, 0);
-      this.setSoundGainAndPan(this.beach_sound, 0);
-      this.setSoundGainAndPan(this.urban_sound, 0);
-      this.setSoundGainAndPan(this.rain_sound, 0);
-      this.setSoundGainAndPan(this.wind_sound, 0);
+      this.#ambientSoundRevision++;
+      this.#cancelAmbientSoundReadback();
+      this.setAmbientSoundGainAndPan('forest_sound', 'forest.mp3', 0);
+      this.setAmbientSoundGainAndPan('beach_sound', 'beach.mp3', 0);
+      this.setAmbientSoundGainAndPan('urban_sound', 'urban.mp3', 0);
+      this.setAmbientSoundGainAndPan('rain_sound', 'rain.mp3', 0);
+      this.setAmbientSoundGainAndPan('wind_sound', 'wind.mp3', 0);
       this.jetEngineSound.mute();
     }
   }
