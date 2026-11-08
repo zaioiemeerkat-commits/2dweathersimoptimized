@@ -25,6 +25,11 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Check out beta source
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+          path: beta-source
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
@@ -37,8 +42,17 @@ jobs:
             --exclude='.github' \
             --exclude='.vscode' \
             --exclude='saves' \
+            --exclude='beta-source' \
             --exclude='_site' \
             ./ _site/
+          mkdir -p _site/beta
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.vscode' \
+            --exclude='saves' \
+            --exclude='_site' \
+            beta-source/ _site/beta/
       - name: Upload site files
         uses: actions/upload-pages-artifact@v3
         with:

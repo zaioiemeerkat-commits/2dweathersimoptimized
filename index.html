@@ -1330,6 +1330,30 @@
             justify-content: center;
         }
 
+        .main-menu-beta-link {
+            background: rgba(91, 174, 255, 0.14);
+            border: 1px solid rgba(128, 195, 255, 0.48);
+            border-radius: 999px;
+            color: rgba(255, 255, 255, 0.94);
+            font: 600 14px/1.2 "Plus Jakarta Sans", sans-serif;
+            padding: 11px 20px;
+            text-decoration: none;
+            transition: background-color 160ms ease, border-color 160ms ease,
+                transform 160ms ease;
+        }
+
+        .main-menu-beta-link:hover,
+        .main-menu-beta-link:focus-visible {
+            background: rgba(91, 174, 255, 0.25);
+            border-color: rgba(160, 210, 255, 0.78);
+            outline: none;
+            transform: translateY(-1px);
+        }
+
+        .main-menu-beta-link:focus-visible {
+            box-shadow: 0 0 0 3px rgba(91, 174, 255, 0.28);
+        }
+
         .main-menu-file-input {
             display: none;
         }
@@ -1637,6 +1661,9 @@
                     <span class="main-menu-tooltip" role="tooltip">Load existing save</span>
                 </div>
             </div>
+            <a class="main-menu-beta-link" href="beta/" aria-label="Try the V1.1 beta version">
+                Try the V1.1 Beta
+            </a>
             <input class="main-menu-file-input" type="file" id="fileInput" name="fileInput"
                 accept=".weathersandbox" onchange="loadData()" />
             </section>
