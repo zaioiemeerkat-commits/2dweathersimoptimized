@@ -9,11 +9,146 @@ details. You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+if (window.matchMedia('(pointer: coarse) and (hover: none), (max-width: 600px)').matches) {
+  let fullscreenRequestPending = false;
+  let fullscreenButton;
+
+  const showFullscreenButton = function() {
+    if (fullscreenButton)
+      return;
+
+    fullscreenButton = document.createElement('button');
+    fullscreenButton.type = 'button';
+    fullscreenButton.textContent = 'Enter fullscreen';
+    fullscreenButton.setAttribute('aria-label', 'Enter fullscreen mode');
+    fullscreenButton.title = 'If fullscreen is unavailable in this browser tab, open the page as an installed app.';
+    Object.assign(fullscreenButton.style, {
+      position : 'fixed',
+      bottom : 'max(16px, env(safe-area-inset-bottom))',
+      left : '50%',
+      transform : 'translateX(-50%)',
+      zIndex : '10010',
+      padding : '12px 18px',
+      border : '1px solid rgba(255, 255, 255, 0.35)',
+      borderRadius : '999px',
+      background : 'rgba(18, 25, 35, 0.88)',
+      color : '#fff',
+      font : '600 14px "Plus Jakarta Sans", sans-serif',
+      boxShadow : '0 4px 18px rgba(0, 0, 0, 0.35)'
+    });
+    fullscreenButton.addEventListener('click', requestMobileFullscreen);
+    document.body.appendChild(fullscreenButton);
+  };
+
+  const requestMobileFullscreen = function() {
+    if (document.fullscreenElement || fullscreenRequestPending)
+      return;
+
+    const root = document.documentElement;
+    const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (typeof requestFullscreen != 'function') {
+      showFullscreenButton();
+      return;
+    }
+
+    fullscreenRequestPending = true;
+    try {
+      const request = requestFullscreen.call(root);
+      if (request && typeof request.then == 'function') {
+        request.then(function() {
+          fullscreenRequestPending = false;
+        }, function(error) {
+          fullscreenRequestPending = false;
+          console.warn('Could not enter fullscreen:', error);
+          showFullscreenButton();
+        });
+      } else {
+        fullscreenRequestPending = false;
+      }
+    } catch (error) {
+      fullscreenRequestPending = false;
+      console.warn('Could not enter fullscreen:', error);
+      showFullscreenButton();
+    }
+  };
+
+  document.addEventListener('fullscreenchange', function() {
+    if (document.fullscreenElement) {
+      fullscreenRequestPending = false;
+      fullscreenButton?.remove();
+      fullscreenButton = null;
+    }
+  });
+  document.addEventListener('pointerup', requestMobileFullscreen, true);
+  document.addEventListener('click', requestMobileFullscreen, true);
+}
+
+function getEstimatedSimulationCapacity()
+{
+  const deviceMemory = navigator.deviceMemory;
+  const logicalCores = navigator.hardwareConcurrency;
+  const memoryBudget = Number.isFinite(deviceMemory)
+    ? clamp(deviceMemory * 350000, 1000000, 4200000)
+    : 1500000;
+  const coreBudget = Number.isFinite(logicalCores)
+    ? clamp(logicalCores * 250000, 1000000, 2500000)
+    : 1500000;
+  return Math.min(memoryBudget, coreBudget);
+}
+
+function isMobileSetupDevice()
+{
+  return window.matchMedia('(pointer: coarse)').matches ||
+    window.matchMedia('(max-width: 768px)').matches;
+}
+
+function getMobileSimulationLimitError(cellCount)
+{
+  if (!isMobileSetupDevice() || cellCount <= getEstimatedSimulationCapacity())
+    return null;
+  return new Error('This mobile device has an estimated simulation limit of ' +
+    Math.floor(getEstimatedSimulationCapacity()).toLocaleString() +
+    ' cells. Reduce the simulation resolution and try again.');
+}
+
 function updateSetupSliders()
 {
-  let simResX = parseInt(simResSelX.value);
-  let simResY = parseInt(simResSelY.value);
+  const simResSelX = document.getElementById('simResSelX');
+  const simResSelY = document.getElementById('simResSelY');
+  let simResX = parseInt(simResSelX.value, 10);
+  let simResY = parseInt(simResSelY.value, 10);
   let simHeight = parseInt(simHeightSel.value);
+  const isMobile = isMobileSetupDevice();
+  const mobileCellLimit = getEstimatedSimulationCapacity();
+
+  if (!simResSelX.dataset.desktopMax)
+    simResSelX.dataset.desktopMax = simResSelX.max;
+  if (!simResSelY.dataset.desktopMax)
+    simResSelY.dataset.desktopMax = simResSelY.max;
+
+  if (isMobile) {
+    const activeSlider = document.activeElement;
+    if (activeSlider == simResSelX && simResX * simResY > mobileCellLimit)
+      simResX = Math.max(100, Math.floor(mobileCellLimit / simResY / 100) * 100);
+    else if (activeSlider == simResSelY && simResX * simResY > mobileCellLimit)
+      simResY = Math.max(100, Math.floor(mobileCellLimit / simResX / 10) * 10);
+    else if (simResX * simResY > mobileCellLimit)
+      simResX = Math.max(100, Math.floor(mobileCellLimit / simResY / 100) * 100);
+
+    simResSelX.max = Math.min(
+      Number(simResSelX.dataset.desktopMax),
+      Math.max(100, Math.floor(mobileCellLimit / simResY / 100) * 100)
+    );
+    simResSelY.max = Math.min(
+      Number(simResSelY.dataset.desktopMax),
+      Math.max(100, Math.floor(mobileCellLimit / simResX / 10) * 10)
+    );
+    simResSelX.value = simResX;
+    simResSelY.value = simResY;
+  } else {
+    simResSelX.max = simResSelX.dataset.desktopMax;
+    simResSelY.max = simResSelY.dataset.desktopMax;
+  }
 
   let cellHeight = simHeight / simResY;
   let simWidth = cellHeight * simResX;
@@ -44,13 +179,7 @@ function updatePerformanceEstimate(simResX, simResY)
   const cellCount = simResX * simResY;
   const deviceMemory = navigator.deviceMemory;
   const logicalCores = navigator.hardwareConcurrency;
-  const memoryBudget = Number.isFinite(deviceMemory)
-    ? clamp(deviceMemory * 350000, 1000000, 4200000)
-    : 1500000;
-  const coreBudget = Number.isFinite(logicalCores)
-    ? clamp(logicalCores * 250000, 1000000, 2500000)
-    : 1500000;
-  const estimatedCapacity = Math.min(memoryBudget, coreBudget);
+  const estimatedCapacity = getEstimatedSimulationCapacity();
   const workloadRatio = cellCount / estimatedCapacity;
   const level = workloadRatio <= 0.7 ? 'good'
     : workloadRatio <= 1.25 ? 'moderate'
@@ -71,7 +200,8 @@ function updatePerformanceEstimate(simResX, simResY)
   estimate.querySelector('[data-performance-estimate-label]').textContent = labels[level];
   estimate.querySelector('[data-performance-estimate-details]').textContent =
     `${cellCount.toLocaleString()} simulation cells` +
-    (deviceDetails.length ? ` · browser reports ${deviceDetails.join(' and ')}` : ' · device details unavailable');
+    (deviceDetails.length ? ` · browser reports ${deviceDetails.join(' and ')}` : ' · device details unavailable') +
+    (isMobileSetupDevice() ? ` · mobile limit about ${Math.floor(estimatedCapacity).toLocaleString()} cells` : '');
 }
 
 function showNewSimulationSetup()
@@ -144,7 +274,7 @@ async function getSoundingGraphImgUrl(url)
     const img = doc.querySelectorAll('img')[0];
     const imageSrc = img && img.getAttribute('src');
     if (!imageSrc)
-      throw new Error('Sounding graph image was not found in the response');
+      return null;
 
     return new URL(imageSrc, 'https://www.meteociel.fr/').href;
   } catch (error) {
@@ -390,7 +520,7 @@ function createStationSelect()
   select.value = 10868;
 
   select.onchange = function() {
-    const station = Object.values(soundingStations)[select.selectedIndex];
+    const station = Object.values(soundingStations).find(station => station.id == select.value);
     if (!station)
       throw new Error('The selected sounding station is not available.');
     startLatitude = station.lat;
@@ -402,6 +532,11 @@ function createStationSelect()
     startDate = datePicker.value ? new Date(datePicker.value + 'T00:00:00') : null;
     prepareSounding();
   };
+
+  const selectedStation = Object.values(soundingStations).find(station => station.id == select.value);
+  if (selectedStation)
+    startLatitude = selectedStation.lat;
+  startDate = datePicker.value ? new Date(datePicker.value + 'T00:00:00') : null;
 
   return select;
 }
@@ -487,6 +622,7 @@ const guiControls_default = {
   wholeWidth : false,
   wholeWidthBrushWidth : 100,
   brushIntensity : 0.01,
+  verticalAirStrengthMps : 1.0,
   windPushStrengthMph : 50,
   windPushDirection : 'right',
   windPushSetTemperature : false,
@@ -499,10 +635,12 @@ const guiControls_default = {
   enablePrecipitation : true,
   showDrops : false,
   paused : false,
+  haptics : true,
   IterPerFrame : 10,
   auto_IterPerFrame : true,
   autoFpsTarget : '120',
   performancePreset : 'Balanced',
+  eyeFriendlyMode : true,
   hdrQuality : '75%',
   bloomQuality : '50%',
   bloomEnabled : true,
@@ -611,6 +749,7 @@ var lastFrameNum = 0;
 
 var iterNum = 0;
 var pauseController = null;
+var mobilePauseDockButton = null;
 const depositionMassToWaterMm = 0.1; // Matches the shader calibration; particle mass has no kg unit.
 const rainGaugeBucketCapacityMm = 0.2;
 const rainGaugeRateWindowMinutes = 10;
@@ -664,6 +803,54 @@ let bloomRenderScale = 0.5;
 
 
 function clamp(num, min, max) { return Math.min(Math.max(num, min), max); }
+
+function triggerHapticFeedback(pattern, strength)
+{
+  if (guiControls?.haptics === false || !Array.isArray(pattern) || !pattern.length ||
+      !Number.isFinite(strength))
+    return;
+
+  if (typeof navigator.vibrate == 'function') {
+    try {
+      navigator.vibrate(pattern);
+    } catch (error) {
+      console.warn('Could not trigger haptic feedback:', error);
+    }
+  }
+
+  soundSystem?.playHapticFeedback(pattern, clamp(strength / 4, 0, 1));
+}
+
+function triggerWeatherHaptic(strength, delaySeconds = 0)
+{
+  if (!Number.isFinite(strength))
+    return;
+
+  const normalizedStrength = clamp(strength / 4, 0, 1);
+  const pulseDuration = Math.round(8 + normalizedStrength * 30);
+  const pattern = normalizedStrength >= 0.65 ? [pulseDuration, 24, pulseDuration] :
+    normalizedStrength >= 0.3 ? [pulseDuration, 20, 8] : [pulseDuration];
+
+  if (delaySeconds > 0)
+    window.setTimeout(() => triggerHapticFeedback(pattern, strength), Math.min(delaySeconds * 1000, 60000));
+  else
+    triggerHapticFeedback(pattern, strength);
+}
+
+function getThunderTravel(x, y)
+{
+  const camXnorm = 1. - (cam.curXpos + 1.0) / 2.0;
+  const camDistFromSim = cellHeight * sim_res_x * 0.5 / cam.curZoom;
+  const camHorDistFromStrike = (x - camXnorm) * cellHeight * sim_res_x;
+  const vecStrikeToCam = new Vec2D(camDistFromSim, camHorDistFromStrike);
+  const distance = vecStrikeToCam.mag();
+  const leftRightBalance = -vecStrikeToCam.angle();
+  let soundDelay = distance / 343;
+  const simTimeMult = timePerIteration * guiControls.IterPerFrame * FPS * 3600;
+  soundDelay /= simTimeMult;
+
+  return {distance, leftRightBalance, soundDelay};
+}
 
 function screenToSimX(screenX)
 {
@@ -993,10 +1180,16 @@ class FBO // wraps texture, frambuffer and info in one
 
   constructor(w, h, internalFormat, format, type, texFilter, wrapMode_S)
   {
+    if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1)
+      throw new RangeError(`Invalid framebuffer dimensions: ${w}x${h}.`);
+
     this.width = w;
     this.height = h;
     gl.activeTexture(gl.TEXTURE0);
     this.texture = gl.createTexture();
+    if (!this.texture)
+      throw new Error('Unable to allocate framebuffer texture.');
+
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, texFilter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, texFilter);
@@ -1009,8 +1202,21 @@ class FBO // wraps texture, frambuffer and info in one
     gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, null);
 
     this.frameBuffer = gl.createFramebuffer();
+    if (!this.frameBuffer) {
+      gl.deleteTexture(this.texture);
+      throw new Error('Unable to allocate framebuffer.');
+    }
+
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.frameBuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.texture, 0);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    if (status != gl.FRAMEBUFFER_COMPLETE) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.deleteFramebuffer(this.frameBuffer);
+      gl.deleteTexture(this.texture);
+      throw new Error(`Framebuffer is incomplete (status 0x${status.toString(16)}).`);
+    }
+
     gl.viewport(0, 0, w, h);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -1027,54 +1233,63 @@ class FBO // wraps texture, frambuffer and info in one
 
 function createHdrFBO()
 {
-  if (hdrFBO)
-    hdrFBO.dispose();
   const width = Math.max(1, Math.floor(canvas.width * hdrRenderScale));
   const height = Math.max(1, Math.floor(canvas.height * hdrRenderScale));
-  hdrFBO = new FBO(width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
+  const nextHdrFBO = new FBO(width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
+  const previousHdrFBO = hdrFBO;
+  hdrFBO = nextHdrFBO;
+  if (previousHdrFBO)
+    previousHdrFBO.dispose();
 }
 
 function createBloomFBOs()
 {
-  for (const fbo of bloomFBOs)
-    fbo.dispose();
-
   let res = new Vec2D(
-    Math.max(1, Math.floor(canvas.width * bloomRenderScale)),
-    Math.max(1, Math.floor(canvas.height * bloomRenderScale))
+    Math.max(2, Math.floor(canvas.width * bloomRenderScale)),
+    Math.max(2, Math.floor(canvas.height * bloomRenderScale))
   );
 
-  bloomFBOs.length = 0;           // empty array
-  for (let i = 0; i < 100; i++) { // max bloom iterations
-    let width = res.x >> i;       // right shift to devide by 2 multiple times
-    let height = res.y >> i;
+  const nextBloomFBOs = [];
+  try {
+    for (let i = 0; i < 100; i++) { // max bloom iterations
+      let width = res.x >> i;       // right shift to devide by 2 multiple times
+      let height = res.y >> i;
 
-    //  console.log('BloomFBO', i, width, height)
+      if (width < 2 || height < 2)
+        break;
 
-    if (width < 2 || height < 2)
-      break; // stop when texture resolution is 2 x 2
-
-    let fbo = new FBO(width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR);
-    bloomFBOs.push(fbo);
+      nextBloomFBOs.push(new FBO(width, height, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR));
+    }
+  } catch (error) {
+    for (const fbo of nextBloomFBOs)
+      fbo.dispose();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    throw error;
   }
+
+  const previousBloomFBOs = bloomFBOs.splice(0, bloomFBOs.length);
+  bloomFBOs.push(...nextBloomFBOs);
+  for (const fbo of previousBloomFBOs)
+    fbo.dispose();
 }
 
 function createTemporalHistoryTexture()
 {
-  if (temporalHistoryTexture)
-    gl.deleteTexture(temporalHistoryTexture);
-
-  temporalHistoryTexture = gl.createTexture();
-  if (!temporalHistoryTexture)
+  temporalHistoryValid = false;
+  const nextTexture = gl.createTexture();
+  if (!nextTexture)
     throw new Error('Unable to allocate temporal anti-aliasing history texture.');
 
-  gl.bindTexture(gl.TEXTURE_2D, temporalHistoryTexture);
+  gl.bindTexture(gl.TEXTURE_2D, nextTexture);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, canvas.width, canvas.height, 0, gl.RGB, gl.UNSIGNED_BYTE, null);
-  temporalHistoryValid = false;
+  const previousTexture = temporalHistoryTexture;
+  temporalHistoryTexture = nextTexture;
+  if (previousTexture)
+    gl.deleteTexture(previousTexture);
 }
 
 
@@ -1125,6 +1340,9 @@ class Weatherstation
   #menuTransitionDirection = 0;
   #menuTransitionStart = null;
   #menuTransitionDuration = 320;
+  #touchStartX = null;
+  #touchStartY = null;
+  #touchIdentifier = null;
   #canvas;
   #c; // 2d canvas context
   #menuHint;
@@ -1221,6 +1439,7 @@ class Weatherstation
     this.#mainDiv.style.position = 'absolute';
     this.#mainDiv.style.width = '0px';
     this.#mainDiv.style.height = '0px';
+    this.#mainDiv.style.touchAction = 'none';
     this.#mainDiv.style.setProperty('--weather-station-width', this.#width + 'px');
     this.#mainDiv.style.setProperty('--weather-station-height', this.#height + 'px');
 
@@ -1233,6 +1452,7 @@ class Weatherstation
     this.#canvas.style.maxWidth = 'none';
     this.#canvas.style.transform = 'none';
     this.#canvas.style.pointerEvents = 'auto';
+    this.#canvas.style.touchAction = 'none';
 
     this.#displaySunAndIRPower = false;
 
@@ -1251,6 +1471,55 @@ class Weatherstation
         thisObj.#displaySunAndIRPower = !thisObj.#displaySunAndIRPower; // toggle display of radiation flux
       }
     });
+
+    this.#mainDiv.addEventListener('touchstart', function(event) {
+      if (event.touches.length != 1) {
+        thisObj.#touchStartX = null;
+        thisObj.#touchStartY = null;
+        thisObj.#touchIdentifier = null;
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (guiControls.tool == 'TOOL_STATION') {
+        thisObj.destroy();
+        return;
+      }
+      thisObj.#touchStartX = event.touches[0].clientX;
+      thisObj.#touchStartY = event.touches[0].clientY;
+      thisObj.#touchIdentifier = event.touches[0].identifier;
+    }, {passive : false});
+    this.#mainDiv.addEventListener('touchmove', function(event) {
+      if (thisObj.#touchStartY !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    }, {passive : false});
+    this.#mainDiv.addEventListener('touchend', function(event) {
+      if (thisObj.#touchStartY === null)
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      const touch = Array.from(event.changedTouches).find(changedTouch =>
+        changedTouch.identifier == thisObj.#touchIdentifier
+      );
+      if (!touch)
+        return;
+      const deltaX = touch.clientX - thisObj.#touchStartX;
+      const deltaY = touch.clientY - thisObj.#touchStartY;
+      if (Math.abs(deltaY) > 24 && Math.abs(deltaY) > Math.abs(deltaX) * 1.2)
+        thisObj.#scrollMenu(-deltaY);
+      thisObj.#touchStartX = null;
+      thisObj.#touchStartY = null;
+      thisObj.#touchIdentifier = null;
+    }, {passive : false});
+    this.#mainDiv.addEventListener('touchcancel', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      thisObj.#touchStartX = null;
+      thisObj.#touchStartY = null;
+      thisObj.#touchIdentifier = null;
+    }, {passive : false});
 
     this.#canvas.addEventListener('contextmenu', function(event) { event.preventDefault(); }); // Prevent the browser's context menu from appearing
     this.#mainDiv.addEventListener('wheel', function(event) {
@@ -1941,8 +2210,22 @@ class Weatherstation
 
 
 let weatherStations = []; // array holding all weather stations
+let loadDataInProgress = false;
 
 async function loadData()
+{
+  if (loadDataInProgress)
+    return;
+
+  loadDataInProgress = true;
+  try {
+    await loadDataInternal();
+  } finally {
+    loadDataInProgress = false;
+  }
+}
+
+async function loadDataInternal()
 {
   const fileInput = document.getElementById('fileInput');
   const file = fileInput.files[0];
@@ -1952,6 +2235,11 @@ async function loadData()
     sim_res_y = Number.parseInt(document.getElementById('simResSelY').value, 10);
     sim_height = Number.parseInt(document.getElementById('simHeightSel').value, 10);
     const cellCount = sim_res_x * sim_res_y;
+    const mobileLimitError = getMobileSimulationLimitError(cellCount);
+    if (mobileLimitError) {
+      alert(mobileLimitError.message);
+      return;
+    }
     if (!Number.isInteger(sim_res_x) || !Number.isInteger(sim_res_y) || !Number.isInteger(sim_height) ||
         sim_res_x < 100 || sim_res_x > 16000 || sim_res_y < 100 || sim_res_y > 500 ||
         sim_height < 5000 || sim_height > 15000 || cellCount % NUM_DROPLETS_DEVIDER != 0) {
@@ -2011,6 +2299,9 @@ async function loadData()
         cellCount % NUM_DROPLETS_DEVIDER != 0) {
       throw new Error('The save file contains unsupported simulation dimensions.');
     }
+    const mobileLimitError = getMobileSimulationLimitError(cellCount);
+    if (mobileLimitError)
+      throw mobileLimitError;
 
     const loadedDropletCount = cellCount / NUM_DROPLETS_DEVIDER;
     const baseTexture = readArray(Float32Array, cellCount * 4, 'air data');
@@ -2198,6 +2489,8 @@ async function prepareSounding()
 async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initialRainDrops)
 {
   let sliderGradientObserver;
+  let mobileGuiHandleCleanup = null;
+  let hapticsTooltipCleanup = null;
   let loadedShaderCount = 0;
   const totalShaderCount = 30;
 
@@ -2222,6 +2515,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   let currentPerformanceReadouts;
   let currentPerformanceReadoutControllers;
   let currentPerformanceScoreIcon;
+  let graphicsEffectWeights;
+  let updateGraphicsTransitions;
   let displayModeController;
   let previousDisplayMode = guiControls_default.displayMode;
   let displayModeOverlay;
@@ -2717,6 +3012,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     audioCtx;
     jetEngineSound;
 
+    #audioResumePromise = null;
+    #unlockAudio;
     #soundBufferPromises = new Map();
     #ambientSoundLoads = new Set();
     #ambientSoundLevels = new Map();
@@ -2741,6 +3038,80 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     {
       this.audioCtx = new window.AudioContext();
       this.jetEngineSound = new JetEngineSoundGenerator(this.audioCtx);
+      this.#unlockAudio = () => {
+        if (this.audioCtx.state == 'suspended')
+          this.#resumeAudio().catch(error => console.warn('Could not resume audio:', error));
+      };
+      document.addEventListener('pointerdown', this.#unlockAudio, true);
+      document.addEventListener('touchstart', this.#unlockAudio, true);
+      document.addEventListener('keydown', this.#unlockAudio, true);
+      this.#unlockAudio();
+    }
+
+    #resumeAudio()
+    {
+      if (this.audioCtx.state != 'suspended')
+        return Promise.resolve();
+      if (!this.#audioResumePromise) {
+        this.#audioResumePromise = this.audioCtx.resume().finally(() => {
+          this.#audioResumePromise = null;
+        });
+      }
+      return this.#audioResumePromise;
+    }
+
+    playHapticFeedback(pattern, strength)
+    {
+      if (guiControls?.sound !== true || !Array.isArray(pattern))
+        return;
+
+      const play = () => {
+        if (guiControls?.sound !== true || this.audioCtx.state != 'running')
+          return;
+
+        let offset = 0;
+        for (let i = 0; i < pattern.length; i++) {
+          const duration = Math.max(0, Number(pattern[i]) || 0) / 1000;
+          if (i % 2 == 0 && duration > 0)
+            this.#playHapticPulse(this.audioCtx.currentTime + offset, duration, strength);
+          offset += duration;
+        }
+      };
+
+      if (this.audioCtx.state == 'running') {
+        play();
+      } else if (!navigator.userActivation || navigator.userActivation.isActive) {
+        this.#resumeAudio().then(play).catch(error => console.warn('Could not play haptic audio:', error));
+      }
+    }
+
+    #playHapticPulse(startTime, pulseDuration, strength)
+    {
+      const duration = clamp(pulseDuration, 0.055, 0.095);
+      const peak = 0.12 + strength * 0.12;
+      const fundamental = this.audioCtx.createOscillator();
+      const overtone = this.audioCtx.createOscillator();
+      const fundamentalGain = this.audioCtx.createGain();
+      const overtoneGain = this.audioCtx.createGain();
+
+      fundamental.type = 'sine';
+      fundamental.frequency.setValueAtTime(420 + strength * 100, startTime);
+      fundamental.frequency.exponentialRampToValueAtTime(300 + strength * 80, startTime + duration);
+      overtone.type = 'sine';
+      overtone.frequency.setValueAtTime(840 + strength * 200, startTime);
+      overtone.frequency.exponentialRampToValueAtTime(600 + strength * 160, startTime + duration);
+      fundamentalGain.gain.setValueAtTime(0.0001, startTime);
+      fundamentalGain.gain.exponentialRampToValueAtTime(peak, startTime + 0.004);
+      fundamentalGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      overtoneGain.gain.setValueAtTime(0.0001, startTime);
+      overtoneGain.gain.exponentialRampToValueAtTime(peak * 0.38, startTime + 0.004);
+      overtoneGain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      fundamental.connect(fundamentalGain).connect(this.audioCtx.destination);
+      overtone.connect(overtoneGain).connect(this.audioCtx.destination);
+      fundamental.start(startTime);
+      overtone.start(startTime);
+      fundamental.stop(startTime + duration);
+      overtone.stop(startTime + duration);
     }
 
     loadSound(url)
@@ -2796,26 +3167,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     soundThunder(x, y, intensity)
     {
-      let camXnorm = 1. - (cam.curXpos + 1.0) / 2.0;
-
-      let camDistFromSim = cellHeight * sim_res_x * 0.5 / cam.curZoom; // asuming 90° HFOV
-
-      let camHorDistFromStrike = (x - camXnorm) * cellHeight * sim_res_x;
-
-      let vecStrikeToCam = new Vec2D(camDistFromSim, camHorDistFromStrike);
-
-      let distance = vecStrikeToCam.mag();
-
-      let leftRightBalance = -vecStrikeToCam.angle();
-
-      // console.log(camDistFromSim, camHorDistFromStrike, distance, leftRightBalance);
-
-      // Speed of sound ≈ 343 m/s
-      let soundDelay = distance / 343;                                            // in seconds
-
-      let simTimeMult = timePerIteration * guiControls.IterPerFrame * FPS * 3600; // how much faster sime time is than real time
-
-      soundDelay /= simTimeMult;
+      const {distance, leftRightBalance, soundDelay} = getThunderTravel(x, y);
 
       const soundType = intensity > 1.0 ? 'cg' : 'cc';
       const soundNumber = Math.floor(Math.random() * 13) + 1;
@@ -4624,8 +4976,529 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     });
   }
 
+  function updateMobilePauseDock()
+  {
+    if (!mobilePauseDockButton || !guiControls)
+      return;
+    const paused = guiControls.paused;
+    mobilePauseDockButton.setAttribute('aria-label', paused ? 'Resume simulation' : 'Pause simulation');
+    mobilePauseDockButton.title = paused ? 'Resume simulation' : 'Pause simulation';
+    mobilePauseDockButton.dataset.hint = paused ? 'Resume simulation' : 'Pause simulation';
+    mobilePauseDockButton.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    mobilePauseDockButton.innerHTML = paused ?
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 12 7-12 7V5Z"/></svg>' :
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14"/><path d="M16 5v14"/></svg>';
+  }
+
+  function setupMobileGuiHandle(gui, toolController)
+  {
+    const landscapeQuery = window.matchMedia('(max-width: 1024px) and (max-height: 600px) and (orientation: landscape)');
+    if (!window.matchMedia('(max-width: 600px)').matches && !landscapeQuery.matches)
+      return null;
+
+    const main = gui.domElement;
+    const controlsList = main.querySelector(':scope > ul');
+    const closeButton = main.querySelector(':scope > .close-button');
+    const handle = document.createElement('button');
+    let handleIsLandscape = landscapeQuery.matches;
+    let startCoordinate = null;
+    let startState = 'full';
+    let startOffset = 0;
+    let dragIsLandscape = false;
+    let openingHapticTriggered = false;
+    let dragged = false;
+
+    handle.className = 'mobile-gui-handle';
+    handle.type = 'button';
+    handle.setAttribute(
+      'aria-label',
+      landscapeQuery.matches ? 'Controls open. Pull the grip right to hide controls.' :
+        'Controls expanded. Swipe up for full controls or down to minimize.'
+    );
+    handle.setAttribute('aria-controls', 'mobileGuiControls');
+    handle.setAttribute('aria-valuetext', 'Full');
+    handle.setAttribute('aria-expanded', 'true');
+    controlsList.id = 'mobileGuiControls';
+    main.dataset.mobileUiState = 'full';
+    if (landscapeQuery.matches)
+      main.parentElement.appendChild(handle);
+    else
+      main.insertBefore(handle, controlsList);
+
+    if (closeButton)
+      closeButton.hidden = true;
+
+    const quickDock = document.createElement('div');
+    quickDock.className = 'mobile-quick-dock';
+    quickDock.setAttribute('role', 'group');
+    quickDock.setAttribute('aria-label', 'Quick actions');
+    const quickSelection = document.createElement('span');
+    quickSelection.className = 'mobile-quick-selection';
+    quickSelection.setAttribute('aria-hidden', 'true');
+    quickDock.appendChild(quickSelection);
+    const toolOptions = Array.from(toolController.__select.options).map(option => ({
+      value : option.value,
+      label : option.textContent.trim()
+    }));
+    const validToolValues = new Set(toolOptions.map(tool => tool.value));
+    const recentToolsStorageKey = 'weatherSandbox.mobileRecentTools';
+    let recentTools = [];
+    try {
+      const savedTools = JSON.parse(window.localStorage.getItem(recentToolsStorageKey) || '[]');
+      if (Array.isArray(savedTools))
+        recentTools = savedTools.filter((value, index) =>
+          typeof value == 'string' && validToolValues.has(value) && savedTools.indexOf(value) == index
+        ).slice(0, 3);
+    } catch (error) {
+      console.warn('Could not load recently used mobile tools:', error);
+    }
+    const quickHint = document.createElement('div');
+    quickHint.className = 'mobile-quick-hint';
+    quickHint.setAttribute('role', 'status');
+    quickHint.setAttribute('aria-live', 'polite');
+    let quickHintTimer = 0;
+    let quickHintHideTimer = 0;
+
+    function showQuickHint(button)
+    {
+      window.clearTimeout(quickHintHideTimer);
+      quickHint.textContent = button.dataset.hint;
+      quickHint.classList.add('is-visible');
+    }
+
+    function hideQuickHint()
+    {
+      window.clearTimeout(quickHintTimer);
+      quickHint.classList.remove('is-visible');
+      quickHintHideTimer = window.setTimeout(() => {
+        quickHint.textContent = '';
+      }, 240);
+    }
+
+    function addHoldHint(button)
+    {
+      button.addEventListener('pointerdown', function(event) {
+        if (event.button !== undefined && event.button !== 0)
+          return;
+        window.clearTimeout(quickHintTimer);
+        window.clearTimeout(quickHintHideTimer);
+        quickHintTimer = window.setTimeout(() => {
+          showQuickHint(button);
+          triggerWeatherHaptic(1.0);
+        }, 380);
+      });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => {
+        button.addEventListener(type, hideQuickHint);
+      });
+      button.addEventListener('contextmenu', event => event.preventDefault());
+    }
+
+    function lucideIcon(paths)
+    {
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+    }
+
+    const toolIcons = {
+      TOOL_CAMERA : lucideIcon('<path d="m5 9-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>'),
+      TOOL_NONE : lucideIcon('<path d="M15 4 9 10"/><path d="M11 6 6 11l-3 8 2 2 8-3 5-5"/><path d="m14 3 7 7"/>'),
+      TOOL_TEMPERATURE : lucideIcon('<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0Z"/><path d="M12 11v6"/>'),
+      TOOL_WATER : lucideIcon('<path d="M20 16.2A4.5 4.5 0 0 0 18 7.5a6 6 0 0 0-11.6 1.8A4 4 0 0 0 6 17h12"/><path d="M12 21s-3-2.7-3-5a3 3 0 0 1 6 0c0 2.3-3 5-3 5Z"/>'),
+      TOOL_UPDRAFT : lucideIcon('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 19h14"/>'),
+      TOOL_DOWNDRAFT : lucideIcon('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/><path d="M5 5h14"/>'),
+      TOOL_WALL_LAND : lucideIcon('<path d="m3 18 6-10 4 6 3-4 5 8H3Z"/><path d="M3 21h18"/>'),
+      TOOL_WALL_SEA : lucideIcon('<path d="M3 12c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 3-2"/><path d="M3 17c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 3-2"/>'),
+      TOOL_WALL_URBAN : lucideIcon('<path d="M3 21V8l6 3V5l6 3V3h6v18H3Z"/><path d="M7 15h1"/><path d="M12 14h1"/><path d="M17 12h1"/><path d="M17 16h1"/>'),
+      TOOL_WALL_RUNWAY : lucideIcon('<path d="M3 21 21 3"/><path d="m8 16 2 2"/><path d="m12 12 2 2"/><path d="m16 8 2 2"/><path d="m4 8 12 4-4 4L4 8Z"/>'),
+      TOOL_WALL_INDUSTRIAL : lucideIcon('<path d="M3 21V9l6 4V9l6 4V5h6v16H3Z"/><path d="M15 5V2h3v3"/><path d="M7 17h1"/><path d="M12 17h1"/><path d="M17 17h1"/>'),
+      TOOL_WALL_FIRE : lucideIcon('<path d="M12 22a7 7 0 0 0 7-7c0-3-2-5-4-7 0 3-2 4-2 4 0-5-3-8-5-10 0 5-1 7-3 10a7 7 0 0 0 7 10Z"/><path d="M12 22a3 3 0 0 0 3-3c0-1.3-1-2.5-2-3-1 1-4 2-4 4a3 3 0 0 0 3 2Z"/>'),
+      TOOL_SMOKE : lucideIcon('<path d="M8 16h9a4 4 0 1 0-1-7.9A5 5 0 0 0 6.4 9 3.5 3.5 0 0 0 8 16Z"/><path d="M8 20h8"/><path d="M11 4c0 1-1 1-1 2"/><path d="M16 3c0 1-1 1-1 2"/>'),
+      TOOL_WALL_MOIST : lucideIcon('<path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><path d="M9 11c0-1.7 1.3-3 3-3"/><path d="M8 16h8"/>'),
+      TOOL_VEGETATION : lucideIcon('<path d="M11 20A7 7 0 0 1 4 13c0-4 4-7 14-9 0 10-3 16-7 16Z"/><path d="M8 16c2-2 4-4 8-6"/><path d="M12 20v2"/>'),
+      TOOL_WALL_SNOW : lucideIcon('<path d="M12 2v20"/><path d="m4.9 6 14.2 12"/><path d="m19.1 6-14.2 12"/><path d="m8 4 4 2 4-2"/><path d="m8 20 4-2 4 2"/>'),
+      TOOL_WIND : lucideIcon('<path d="M3 8h12a3 3 0 1 0-3-3"/><path d="M2 12h17a3 3 0 1 1-3 3"/><path d="M4 16h6"/>'),
+      TOOL_WIND_PUSH : lucideIcon('<path d="M3 7h11"/><path d="m11 4 3 3-3 3"/><path d="M3 12h16"/><path d="m16 9 3 3-3 3"/><path d="M3 17h11"/>'),
+      TOOL_STATION : lucideIcon('<path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.5"/><path d="M12 7.5v5M9.5 10h5"/>')
+    };
+    const quickToolButtons = new Map();
+
+    function rememberRecentTool(value)
+    {
+      if (!validToolValues.has(value))
+        return;
+      recentTools = [value].concat(recentTools.filter(tool => tool != value)).slice(0, 3);
+      try {
+        window.localStorage.setItem(recentToolsStorageKey, JSON.stringify(recentTools));
+      } catch (error) {
+        console.warn('Could not save recently used mobile tools:', error);
+      }
+      renderRecentTools();
+    }
+
+    function renderRecentTools()
+    {
+      const previousPositions = new Map();
+      quickToolButtons.forEach((button, value) => {
+        if (recentTools.includes(value)) {
+          const rect = button.getBoundingClientRect();
+          previousPositions.set(value, {left : rect.left, top : rect.top});
+        } else {
+          button.remove();
+        }
+      });
+      quickSelection.hidden = recentTools.length == 0;
+      recentTools.forEach(function(value) {
+        const tool = toolOptions.find(option => option.value == value);
+        if (!tool)
+          return;
+        if (!toolIcons[value]) {
+          console.error(`No quick-bar icon is defined for tool "${value}".`);
+          return;
+        }
+        let button = quickToolButtons.get(value);
+        if (!button) {
+          button = document.createElement('button');
+          button.className = 'mobile-quick-action';
+          button.type = 'button';
+          button.title = tool.label;
+          button.setAttribute('aria-label', tool.label);
+          button.dataset.hint = tool.label;
+          button.dataset.tool = value;
+          button.innerHTML = toolIcons[value];
+          addHoldHint(button);
+          button.addEventListener('click', function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+            toolController.setValue(value);
+            if (recentTools[0] != value)
+              rememberRecentTool(value);
+            triggerWeatherHaptic(1.0);
+          });
+          quickToolButtons.set(value, button);
+        }
+        quickDock.insertBefore(button, mobilePauseDockButton || null);
+      });
+      updateQuickToolSelection();
+      quickDock.classList.add('is-reordering');
+      let hasMovingButtons = false;
+      quickToolButtons.forEach((button, value) => {
+        const previous = previousPositions.get(value);
+        if (!previous || !button.isConnected)
+          return;
+        const current = button.getBoundingClientRect();
+        const offsetX = previous.left - current.left;
+        const offsetY = previous.top - current.top;
+        if (offsetX == 0 && offsetY == 0)
+          return;
+        button.style.setProperty('--quick-move-x', offsetX + 'px');
+        button.style.setProperty('--quick-move-y', offsetY + 'px');
+        hasMovingButtons = true;
+      });
+      if (hasMovingButtons) {
+        quickDock.offsetWidth;
+        requestAnimationFrame(() => {
+          quickDock.classList.remove('is-reordering');
+          quickToolButtons.forEach(button => {
+            button.style.setProperty('--quick-move-x', '0px');
+            button.style.setProperty('--quick-move-y', '0px');
+          });
+        });
+      } else {
+        quickDock.classList.remove('is-reordering');
+      }
+    }
+
+    mobilePauseDockButton = document.createElement('button');
+    mobilePauseDockButton.className = 'mobile-quick-action mobile-quick-pause';
+    mobilePauseDockButton.type = 'button';
+    addHoldHint(mobilePauseDockButton);
+    mobilePauseDockButton.addEventListener('click', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      pauseController.setValue(!guiControls.paused);
+      updateMobilePauseDock();
+      triggerWeatherHaptic(1.0);
+    });
+    quickDock.appendChild(mobilePauseDockButton);
+    main.appendChild(quickDock);
+    main.parentElement.appendChild(quickHint);
+    if (validToolValues.has(guiControls.tool))
+      rememberRecentTool(guiControls.tool);
+    else {
+      recentTools = recentTools.slice(0, 3);
+      renderRecentTools();
+    }
+    updateMobilePauseDock();
+
+    function updateQuickToolSelection()
+    {
+      const buttons = quickDock.querySelectorAll('[data-tool]');
+      buttons.forEach(function(button) {
+        button.setAttribute('aria-pressed', button.dataset.tool == guiControls.tool ? 'true' : 'false');
+      });
+      const selectedButton = Array.from(buttons).find(button => button.dataset.tool == guiControls.tool);
+      if (!selectedButton)
+        return;
+      const dockRect = quickDock.getBoundingClientRect();
+      const buttonRect = selectedButton.getBoundingClientRect();
+      quickSelection.style.width = buttonRect.width + 'px';
+      quickSelection.style.height = buttonRect.height + 'px';
+      quickSelection.style.transform =
+        `translate(${buttonRect.left - dockRect.left - quickDock.clientLeft}px, ` +
+        `${buttonRect.top - dockRect.top - quickDock.clientTop}px)`;
+    }
+
+    let quickSelectionUpdateFrame = 0;
+    function scheduleQuickToolSelectionUpdate()
+    {
+      if (quickSelectionUpdateFrame)
+        cancelAnimationFrame(quickSelectionUpdateFrame);
+      quickSelectionUpdateFrame = requestAnimationFrame(() => {
+        quickSelectionUpdateFrame = requestAnimationFrame(() => {
+          quickSelectionUpdateFrame = 0;
+          updateQuickToolSelection();
+        });
+      });
+    }
+
+    const quickDockResizeObserver = typeof ResizeObserver == 'function' ?
+      new ResizeObserver(scheduleQuickToolSelectionUpdate) : null;
+    if (quickDockResizeObserver)
+      quickDockResizeObserver.observe(quickDock);
+
+    toolController.onChange(rememberRecentTool);
+    requestAnimationFrame(renderRecentTools);
+    window.addEventListener('resize', scheduleQuickToolSelectionUpdate);
+    window.addEventListener('orientationchange', scheduleQuickToolSelectionUpdate);
+
+    function isLandscape()
+    {
+      return landscapeQuery.matches;
+    }
+
+    function getStates(landscape)
+    {
+      return landscape ? ['full', 'none'] : ['full', 'half', 'none'];
+    }
+
+    function setState(nextState, withHaptic = true)
+    {
+      const landscape = isLandscape();
+      const states = getStates(landscape);
+      if (!states.includes(nextState) || main.dataset.mobileUiState == nextState)
+        return;
+
+      main.dataset.mobileUiState = nextState;
+      hideQuickHint();
+      const stateIndex = states.indexOf(nextState);
+      const vibration = stateIndex == 0 ? [12, 28, 20] : stateIndex == 1 ? [10] : [8, 55, 5, 55, 3];
+      handle.setAttribute(
+        'aria-valuetext',
+        nextState == 'full' ? 'Full' : nextState == 'half' ? 'Half' : 'Hidden'
+      );
+      handle.setAttribute('aria-expanded', nextState != 'none' ? 'true' : 'false');
+      handle.setAttribute(
+        'aria-label',
+        landscape ?
+          nextState == 'full' ? 'Controls open. Pull the grip right to hide controls.' :
+            'Controls hidden. Pull the grip left to open controls.' :
+          nextState == 'full' ? 'Controls fully expanded. Swipe down to show half or hide controls.' :
+            nextState == 'half' ? 'Controls half expanded. Swipe up for full controls or down to hide controls.' :
+              'Controls hidden. Swipe up to show half or full controls.'
+      );
+      if (withHaptic)
+        triggerHapticFeedback(vibration, stateIndex == 0 ? 2.4 : stateIndex == 1 ? 1.2 : 0.8);
+    }
+
+    function getStateExtent(state, landscape)
+    {
+      if (state == 'none')
+        return landscape ? getLandscapeClosedOffset() : 104;
+      if (state == 'half')
+        return Math.min(window.innerHeight * 0.48, 420);
+      return landscape ? Math.min(window.innerWidth * 0.82, 420) : Math.min(window.innerHeight * 0.8, 680);
+    }
+
+    function getLandscapeClosedOffset()
+    {
+      return Math.max(0, getStateExtent('full', true) - 56);
+    }
+
+    function snapToNearestState(extent, landscape)
+    {
+      return getStates(landscape).reduce(function(nearest, state) {
+        return Math.abs(getStateExtent(state, landscape) - extent) <
+          Math.abs(getStateExtent(nearest, landscape) - extent) ?
+          state : nearest;
+      }, 'full');
+    }
+
+    function resetDrag()
+    {
+      main.style.removeProperty('height');
+      main.style.removeProperty('width');
+      main.style.removeProperty('transform');
+      handle.style.removeProperty('--mobile-gui-offset');
+      main.classList.remove('is-dragging');
+      main.classList.remove('is-content-visible');
+      startCoordinate = null;
+      openingHapticTriggered = false;
+      dragged = false;
+    }
+
+    handle.addEventListener('pointerdown', function(event) {
+      if (event.isPrimary === false)
+        return;
+      dragIsLandscape = isLandscape();
+      startCoordinate = dragIsLandscape ? event.clientX : event.clientY;
+      startState = main.dataset.mobileUiState;
+      startOffset = dragIsLandscape ?
+        startState == 'none' ? getLandscapeClosedOffset() : 0 :
+        main.getBoundingClientRect().height;
+      openingHapticTriggered = false;
+      dragged = false;
+      handle.setPointerCapture(event.pointerId);
+      main.classList.add('is-dragging');
+      event.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', function(event) {
+      if (startCoordinate === null)
+        return;
+
+      const coordinate = dragIsLandscape ? event.clientX : event.clientY;
+      const distance = coordinate - startCoordinate;
+      if (Math.abs(distance) > 4)
+        dragged = true;
+      if (dragIsLandscape) {
+        const maxOffset = getLandscapeClosedOffset();
+        let offset = startOffset + distance;
+        if (startState == 'none' && distance < 0) {
+          const openingDistance = -distance;
+          const giveDistance = 10;
+          offset = maxOffset - Math.max(0, openingDistance - giveDistance) * 0.9;
+          if (openingDistance > giveDistance && !openingHapticTriggered) {
+            openingHapticTriggered = true;
+            triggerWeatherHaptic(1.2);
+          }
+        }
+        offset = clamp(offset, 0, maxOffset);
+        main.style.setProperty('transform', 'translateX(' + offset + 'px)', 'important');
+        handle.style.setProperty('--mobile-gui-offset', offset + 'px');
+        if (offset < maxOffset - 12)
+          main.classList.add('is-content-visible');
+        else
+          main.classList.remove('is-content-visible');
+      } else {
+        const closedExtent = getStateExtent('none', false);
+        const extent = clamp(startOffset - distance, closedExtent, getStateExtent('full', false));
+        main.style.setProperty('height', extent + 'px', 'important');
+        if (extent > closedExtent + 12)
+          main.classList.add('is-content-visible');
+        else
+          main.classList.remove('is-content-visible');
+      }
+      event.preventDefault();
+    });
+
+    handle.addEventListener('pointerup', function(event) {
+      if (startCoordinate === null)
+        return;
+
+      const coordinate = dragIsLandscape ? event.clientX : event.clientY;
+      const distance = coordinate - startCoordinate;
+      let nextState;
+      if (dragged && Math.abs(distance) > 4) {
+        if (dragIsLandscape) {
+          const closeThreshold = Math.max(56, getLandscapeClosedOffset() * 0.2);
+          const openThreshold = 48;
+          nextState = startState == 'full' ?
+            distance > closeThreshold ? 'none' : 'full' :
+            distance < -openThreshold ? 'full' : 'none';
+        } else {
+          nextState = snapToNearestState(main.getBoundingClientRect().height, false);
+        }
+        setState(nextState, !(dragIsLandscape && openingHapticTriggered));
+      }
+      resetDrag();
+    });
+
+    handle.addEventListener('pointercancel', function() {
+      resetDrag();
+    });
+
+    handle.addEventListener('click', function(event) {
+      if (event.detail != 0)
+        return;
+      const states = getStates(isLandscape());
+      const index = states.indexOf(main.dataset.mobileUiState);
+      setState(states[(index + 1) % states.length]);
+    });
+
+    function updateHandleOrientation()
+    {
+      const landscape = isLandscape();
+      if (landscape == handleIsLandscape)
+        return;
+      if (startCoordinate !== null)
+        resetDrag();
+      handleIsLandscape = landscape;
+      if (landscape)
+      {
+        if (handle.parentElement != main.parentElement)
+          main.parentElement.appendChild(handle);
+      }
+      else
+      {
+        if (handle.parentElement != main)
+          main.insertBefore(handle, controlsList);
+      }
+      if (landscape && main.dataset.mobileUiState == 'half')
+        setState('full');
+      scheduleQuickToolSelectionUpdate();
+    }
+
+    window.addEventListener('orientationchange', updateHandleOrientation);
+    window.addEventListener('resize', updateHandleOrientation);
+    if (typeof landscapeQuery.addEventListener == 'function')
+      landscapeQuery.addEventListener('change', updateHandleOrientation);
+    else if (typeof landscapeQuery.addListener == 'function')
+      landscapeQuery.addListener(updateHandleOrientation);
+
+    return function() {
+      resetDrag();
+      window.clearTimeout(quickHintTimer);
+      window.clearTimeout(quickHintHideTimer);
+      quickDock.remove();
+      quickHint.remove();
+      window.removeEventListener('resize', scheduleQuickToolSelectionUpdate);
+      window.removeEventListener('orientationchange', scheduleQuickToolSelectionUpdate);
+      if (quickSelectionUpdateFrame)
+        cancelAnimationFrame(quickSelectionUpdateFrame);
+      if (quickDockResizeObserver)
+        quickDockResizeObserver.disconnect();
+      mobilePauseDockButton = null;
+      window.removeEventListener('orientationchange', updateHandleOrientation);
+      window.removeEventListener('resize', updateHandleOrientation);
+      if (typeof landscapeQuery.removeEventListener == 'function')
+        landscapeQuery.removeEventListener('change', updateHandleOrientation);
+      else if (typeof landscapeQuery.removeListener == 'function')
+        landscapeQuery.removeListener(updateHandleOrientation);
+      handle.remove();
+    };
+  }
+
   function setupDatGui(strGuiControls)
   {
+    if (hapticsTooltipCleanup) {
+      hapticsTooltipCleanup();
+      hapticsTooltipCleanup = null;
+    }
+
+    if (mobileGuiHandleCleanup) {
+      mobileGuiHandleCleanup();
+      mobileGuiHandleCleanup = null;
+    }
+
     if (sliderGradientObserver)
       sliderGradientObserver.disconnect();
 
@@ -4638,6 +5511,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       guiControls.bloomQuality = '50%';
     if (!['right', 'left'].includes(guiControls.windPushDirection))
       guiControls.windPushDirection = 'right';
+    guiControls.verticalAirStrengthMps = clamp(Number(guiControls.verticalAirStrengthMps) || 0, 0, 5);
     guiControls.windPushSetTemperature = guiControls.windPushSetTemperature === true;
     guiControls.windPushAirTemperatureC = clamp(Number(guiControls.windPushAirTemperatureC) || 0, -40, 50);
     guiControls.windPushSetHumidity = guiControls.windPushSetHumidity === true;
@@ -4648,6 +5522,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     bloomRenderScale = renderQualityScales[guiControls.bloomQuality];
     if (!['Extreme', 'Quality', 'Balanced', 'Performance', 'Custom'].includes(guiControls.performancePreset))
       guiControls.performancePreset = 'Balanced';
+    guiControls.eyeFriendlyMode = guiControls.eyeFriendlyMode !== false;
     for (const setting of ['filmicToneMapping', 'fxaaEnabled', 'volumetricCloudLighting', 'temporalAAEnabled'])
       guiControls[setting] = guiControls[setting] === true;
     if (!['Unlocked', '30', '60', '90', '120', '144', '165', '240'].includes(guiControls.autoFpsTarget))
@@ -4757,9 +5632,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     const toolController = UI_folder
       .add(guiControls, 'tool', {
+        'Move Camera (drag)' : 'TOOL_CAMERA',
         'Flashlight' : 'TOOL_NONE',
         'Temperature' : 'TOOL_TEMPERATURE',
         'Water Vapor / Cloud' : 'TOOL_WATER',
+        'Updraft (Rising Air)' : 'TOOL_UPDRAFT',
+        'Downdraft (Sinking Air)' : 'TOOL_DOWNDRAFT',
         'Land' : 'TOOL_WALL_LAND',
         'Lake / Sea' : 'TOOL_WALL_SEA',
         'Urban' : 'TOOL_WALL_URBAN',
@@ -4788,6 +5666,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       row.classList.add('wind-push-strength-row', 'wind-push-strength-collapsed');
       return row;
     });
+    const verticalAirStrengthController = UI_folder.add(guiControls, 'verticalAirStrengthMps', 0, 5, 0.1)
+      .name('Updraft / Downdraft Strength (m/s)');
+    const verticalAirStrengthRow = verticalAirStrengthController.domElement.closest('li');
+    verticalAirStrengthRow.classList.add('wind-push-strength-row', 'wind-push-strength-collapsed');
 
     const windPushExtrasFolder = UI_folder.addFolder('Wind Push Extras');
     windPushExtrasFolder.open();
@@ -4837,11 +5719,13 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     function updateWindPushControlsVisibility()
     {
       const visible = guiControls.tool == 'TOOL_WIND_PUSH';
+      const verticalAirVisible = guiControls.tool == 'TOOL_UPDRAFT' || guiControls.tool == 'TOOL_DOWNDRAFT';
       if (visible != previousWindPushControlsVisibility) {
         previousWindPushControlsVisibility = visible;
         windPushRows.forEach(row => row.classList.toggle('wind-push-strength-collapsed', !visible));
         setWindPushExtrasVisibility(visible);
       }
+      verticalAirStrengthRow.classList.toggle('wind-push-strength-collapsed', !verticalAirVisible);
 
       const temperatureVisible = visible && guiControls.windPushSetTemperature;
       if (temperatureVisible != previousWindPushTemperatureVisibility) {
@@ -5176,6 +6060,141 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         temporalAAEnabled: false
       },
     };
+    const graphicsTransitionDuration = 360;
+    const graphicsTransitionStepInterval = 60;
+    graphicsEffectWeights = {
+      bloom : guiControls.bloomEnabled ? 1 : 0,
+      toneMapping : guiControls.filmicToneMapping ? 1 : 0,
+      fxaa : guiControls.fxaaEnabled ? 1 : 0,
+      temporalAA : guiControls.temporalAAEnabled ? 1 : 0,
+      eyeFriendly : guiControls.eyeFriendlyMode ? 1 : 0,
+      volumetricCloudLighting : guiControls.volumetricCloudLighting ? 1 : 0
+    };
+    let graphicsEffectTransition;
+    let renderScaleTransition;
+    let renderScaleTransitionLastStep = 0;
+    let renderQualityInitialized = false;
+
+    function getGraphicsEffectTargets()
+    {
+      return {
+        bloom : guiControls.bloomEnabled ? 1 : 0,
+        toneMapping : guiControls.filmicToneMapping ? 1 : 0,
+        fxaa : guiControls.fxaaEnabled ? 1 : 0,
+        temporalAA : guiControls.temporalAAEnabled ? 1 : 0,
+        eyeFriendly : guiControls.eyeFriendlyMode ? 1 : 0,
+        volumetricCloudLighting : guiControls.volumetricCloudLighting ? 1 : 0
+      };
+    }
+
+    function getRenderQualityForScale(scale)
+    {
+      return Object.keys(renderQualityScales).reduce(function(closest, quality) {
+        return Math.abs(renderQualityScales[quality] - scale) <
+            Math.abs(renderQualityScales[closest] - scale) ? quality : closest;
+      });
+    }
+
+    updateGraphicsTransitions = function(now)
+    {
+      if (graphicsEffectTransition) {
+        const progress = clamp((now - graphicsEffectTransition.start) / graphicsTransitionDuration, 0, 1);
+        const easedProgress = progress * progress * (3 - 2 * progress);
+        for (const key of Object.keys(graphicsEffectWeights)) {
+          const {from, to} = graphicsEffectTransition;
+          graphicsEffectWeights[key] = from[key] + (to[key] - from[key]) * easedProgress;
+        }
+        if (progress >= 1)
+          graphicsEffectTransition = null;
+      }
+
+      if (renderScaleTransition) {
+        const transition = renderScaleTransition;
+        try {
+          const progress = clamp((now - transition.start) / graphicsTransitionDuration, 0, 1);
+          const easedProgress = progress * progress * (3 - 2 * progress);
+          const hdrScale = transition.hdrFrom + (transition.hdrTo - transition.hdrFrom) * easedProgress;
+          const bloomScale = transition.bloomFrom + (transition.bloomTo - transition.bloomFrom) * easedProgress;
+          const shouldApplyStep = now - renderScaleTransitionLastStep >= graphicsTransitionStepInterval || progress >= 1;
+
+          if (shouldApplyStep) {
+            renderScaleTransitionLastStep = now;
+            if (hdrFBO) {
+              const hdrWidth = Math.max(1, Math.floor(canvas.width * hdrScale));
+              const hdrHeight = Math.max(1, Math.floor(canvas.height * hdrScale));
+              if (hdrFBO.width != hdrWidth || hdrFBO.height != hdrHeight) {
+                hdrRenderScale = hdrScale;
+                createHdrFBO();
+              }
+            } else {
+              hdrRenderScale = hdrScale;
+            }
+
+            if (bloomFBOs.length) {
+              const bloomWidth = Math.max(1, Math.floor(canvas.width * bloomScale));
+              const bloomHeight = Math.max(1, Math.floor(canvas.height * bloomScale));
+              if (bloomFBOs[0].width != bloomWidth || bloomFBOs[0].height != bloomHeight) {
+                bloomRenderScale = bloomScale;
+                createBloomFBOs();
+              }
+            } else {
+              bloomRenderScale = bloomScale;
+            }
+          }
+
+          if (progress >= 1) {
+            hdrRenderScale = transition.hdrTo;
+            bloomRenderScale = transition.bloomTo;
+            if (hdrFBO &&
+                (hdrFBO.width != Math.max(1, Math.floor(canvas.width * hdrRenderScale)) ||
+                 hdrFBO.height != Math.max(1, Math.floor(canvas.height * hdrRenderScale))))
+              createHdrFBO();
+            if (bloomFBOs.length &&
+                (bloomFBOs[0].width != Math.max(1, Math.floor(canvas.width * bloomRenderScale)) ||
+                 bloomFBOs[0].height != Math.max(1, Math.floor(canvas.height * bloomRenderScale))))
+              createBloomFBOs();
+            renderScaleTransition = null;
+          }
+        } catch (error) {
+          renderScaleTransition = null;
+          hdrRenderScale = hdrFBO ? hdrFBO.width / canvas.width : transition.hdrFrom;
+          bloomRenderScale = bloomFBOs.length ? bloomFBOs[0].width / canvas.width : transition.bloomFrom;
+          guiControls.hdrQuality = getRenderQualityForScale(hdrRenderScale);
+          guiControls.bloomQuality = getRenderQualityForScale(bloomRenderScale);
+          hdrQualityController.updateDisplay();
+          bloomQualityController.updateDisplay();
+          updateRenderPresetLabel();
+          console.error('The graphics render-scale transition failed; retaining allocated framebuffer quality.', error);
+        }
+      }
+    };
+
+    function transitionGraphicsEffects()
+    {
+      const now = performance.now();
+      updateGraphicsTransitions(now);
+      const targets = getGraphicsEffectTargets();
+      if (graphicsEffectWeights.temporalAA == 0 && targets.temporalAA > 0)
+        temporalHistoryValid = false;
+      graphicsEffectTransition = {
+        from : {...graphicsEffectWeights},
+        to : targets,
+        start : now
+      };
+    }
+
+    function positionPerformanceTooltip(tooltip, anchor)
+    {
+      const rect = anchor.getBoundingClientRect();
+      const tooltipWidth = tooltip.offsetWidth;
+      const preferredLeft = rect.left > 300 ?
+        rect.left - tooltipWidth - 30 : rect.right + 12;
+      const left = Math.max(8, Math.min(preferredLeft, window.innerWidth - tooltipWidth - 8));
+      const top = Math.max(8, Math.min(rect.top, window.innerHeight - tooltip.offsetHeight - 8));
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+    }
+
     const presetController = performanceFolder.add(guiControls, 'performancePreset', ['Extreme', 'Quality', 'Balanced', 'Performance', 'Custom'])
       .name('Quality Preset')
       .onChange(function(preset) {
@@ -5191,14 +6210,31 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         bloomQualityController.updateDisplay();
         bloomEnabledController.updateDisplay();
         renderTechnologyControllers.forEach(controller => controller.updateDisplay());
-        temporalHistoryValid = false;
-        applyRenderQuality();
+        transitionGraphicsEffects();
+        applyRenderQuality(true);
       });
 
-    function applyRenderQuality()
+    function applyRenderQuality(transition = false)
     {
-      hdrRenderScale = renderQualityScales[guiControls.hdrQuality];
-      bloomRenderScale = renderQualityScales[guiControls.bloomQuality];
+      const hdrScale = renderQualityScales[guiControls.hdrQuality];
+      const bloomScale = renderQualityScales[guiControls.bloomQuality];
+      if (transition && renderQualityInitialized) {
+        renderScaleTransition = {
+          hdrFrom : hdrRenderScale,
+          hdrTo : hdrScale,
+          bloomFrom : bloomRenderScale,
+          bloomTo : bloomScale,
+          start : performance.now()
+        };
+        renderScaleTransitionLastStep = 0;
+        return;
+      }
+
+      if (!renderQualityInitialized || !transition) {
+        hdrRenderScale = hdrScale;
+        bloomRenderScale = bloomScale;
+        renderQualityInitialized = true;
+      }
       if (hdrFBO)
         createHdrFBO();
       if (bloomFBOs.length)
@@ -5213,13 +6249,13 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       });
       guiControls.performancePreset = matchingPreset || 'Custom';
       presetController.updateDisplay();
-      temporalHistoryValid = false;
     }
 
     function markCustomRenderQuality()
     {
       updateRenderPresetLabel();
-      applyRenderQuality();
+      transitionGraphicsEffects();
+      applyRenderQuality(true);
     }
 
     const hdrQualityController = performanceFolder.add(guiControls, 'hdrQuality', ['25%', '35%', '50%', '60%', '75%', '85%', '100%'])
@@ -5228,6 +6264,9 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     const bloomQualityController = performanceFolder.add(guiControls, 'bloomQuality', ['25%', '35%', '50%', '60%', '75%', '85%', '100%'])
       .name('Bloom Quality')
       .onChange(markCustomRenderQuality);
+    const eyeFriendlyController = performanceFolder.add(guiControls, 'eyeFriendlyMode')
+      .name('Eye Friendly Mode')
+      .onChange(transitionGraphicsEffects);
     const bloomEnabledController = performanceFolder.add(guiControls, 'bloomEnabled')
       .name('Bloom Effects')
       .onChange(markCustomRenderQuality);
@@ -5238,7 +6277,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       ['temporalAAEnabled', 'Temporal Anti-Aliasing']
     ];
     const renderTechnologyControllers = renderTechnologySettings.map(([setting, label]) =>
-      performanceFolder.add(guiControls, setting).name(label).onChange(updateRenderPresetLabel));
+      performanceFolder.add(guiControls, setting).name(label).onChange(function() {
+        updateRenderPresetLabel();
+        transitionGraphicsEffects();
+      }));
     performanceFolder.add(guiControls, 'showPlants')
       .name('Render Plants')
       .listen();
@@ -5295,6 +6337,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       'Quality Preset': ['Choose a balanced default or favor image quality/performance. This changes HDR and bloom rendering quality only; weather calculations stay the same.', 'Varies', 'medium'],
       'HDR Render Scale': ['Sets the resolution used to render the HDR scene before it is upscaled. Lower values can improve rendering speed but make details softer.', 'Low', 'low'],
       'Bloom Quality': ['Controls the resolution used for bloom lighting. Lower settings reduce post-processing work and produce softer, less detailed glow.', 'Low', 'low'],
+      'Eye Friendly Mode': ['Dims the final image for more comfortable viewing while keeping the simulation graphics and visual effects enabled. Available with every quality preset.', 'Low', 'low'],
       'Bloom Effects': ['Turns the bloom post-processing passes on or off. Disabling bloom reduces GPU post-processing work and removes the soft glow around bright areas.', 'Medium', 'medium'],
       'Filmic ACES Tone Mapping': ['Applies ACES filmic tone mapping to compress bright HDR colors into the display range while preserving more highlight detail. This adds a small post-processing cost.', 'Low', 'low'],
       'FXAA Anti-Aliasing': ['Smooths jagged edges in the final image with a screen-space filter. It adds a small post-processing cost and can slightly soften fine details.', 'Low', 'low'],
@@ -5308,10 +6351,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       'Auto FPS Target': ['Sets the frame-rate goal for Auto Adjust. Unlocked disables iteration auto-adjustment; the browser schedules rendering at the maximum rate supported by the display. Numeric targets may reduce iterations per frame. A 120 FPS target cannot override a lower display refresh rate or rendering workload.', 'Medium, with simulation-speed tradeoff', 'medium'],
     };
     let performanceHelpHideTimer;
-    let performanceTooltip = document.querySelector('.performance-tooltip');
+    let performanceTooltip = document.querySelector('.performance-setting-tooltip');
     if (!performanceTooltip) {
       performanceTooltip = document.createElement('div');
-      performanceTooltip.className = 'performance-tooltip';
+      performanceTooltip.className = 'performance-tooltip performance-setting-tooltip';
       performanceTooltip.setAttribute('role', 'tooltip');
       performanceTooltip.innerHTML = '<div class="performance-tooltip-description"></div><div class="performance-tooltip-impact"></div>';
       document.body.appendChild(performanceTooltip);
@@ -5329,9 +6372,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         performanceDescription.textContent = help[0];
         performanceImpact.textContent = 'Performance impact: ' + help[1];
         performanceImpact.dataset.level = help[2];
-        const rect = row.getBoundingClientRect();
-        performanceTooltip.style.top = Math.max(8, Math.min(rect.top, window.innerHeight - 100)) + 'px';
-        performanceTooltip.style.left = rect.left > 300 ? (rect.left - 280) + 'px' : Math.min(rect.right + 12, window.innerWidth - 272) + 'px';
+        positionPerformanceTooltip(performanceTooltip, row);
         performanceTooltip.classList.add('is-visible');
       });
       row.addEventListener('mouseleave', function() {
@@ -5403,6 +6444,73 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
     });
 
+    const mobileHapticsQuery = window.matchMedia(
+      '(max-width: 600px), (max-width: 1024px) and (max-height: 600px) and (orientation: landscape)'
+    );
+    if (mobileHapticsQuery.matches) {
+      const hapticsController = advanced_folder.add(guiControls, 'haptics')
+        .name('Toggle Haptics');
+      const hapticsRow = hapticsController.domElement.closest('.cr');
+      const hapticsLabel = hapticsRow?.querySelector('.property-name');
+      if (!hapticsLabel)
+        throw new Error('Unable to find the Toggle Haptics label in the Advanced controls.');
+      const hapticsInfo = document.createElement('button');
+      hapticsInfo.className = 'haptics-info-button';
+      hapticsInfo.type = 'button';
+      hapticsInfo.setAttribute('aria-label', 'Haptics information');
+      hapticsInfo.setAttribute('aria-expanded', 'false');
+      hapticsInfo.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+      hapticsLabel.appendChild(hapticsInfo);
+
+      const hapticsTooltip = document.createElement('div');
+      hapticsTooltip.className = 'performance-tooltip haptics-tooltip';
+      hapticsTooltip.setAttribute('role', 'tooltip');
+      hapticsTooltip.textContent =
+        'Haptics is optimized for an X-axis linear motor, which is on the higher end of haptic motors. If you have a device that rattles instead of delivering crisp taps, it is recommended you turn this off.';
+      document.body.appendChild(hapticsTooltip);
+
+      let hapticsTooltipHideTimer;
+      function hideHapticsTooltip()
+      {
+        clearTimeout(hapticsTooltipHideTimer);
+        hapticsInfo.setAttribute('aria-expanded', 'false');
+        hapticsTooltip.classList.remove('is-visible');
+      }
+
+      function showHapticsTooltip()
+      {
+        clearTimeout(hapticsTooltipHideTimer);
+        positionPerformanceTooltip(hapticsTooltip, hapticsRow);
+        hapticsInfo.setAttribute('aria-expanded', 'true');
+        hapticsTooltip.classList.add('is-visible');
+      }
+
+      hapticsInfo.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (hapticsTooltip.classList.contains('is-visible'))
+          hideHapticsTooltip();
+        else
+          showHapticsTooltip();
+      });
+      hapticsInfo.addEventListener('blur', () => {
+        hapticsTooltipHideTimer = setTimeout(hideHapticsTooltip, 150);
+      });
+      function dismissHapticsTooltip(event)
+      {
+        if (!hapticsRow.contains(event.target) && !hapticsTooltip.contains(event.target))
+          hideHapticsTooltip();
+      }
+      hapticsTooltip.addEventListener('pointerdown', event => event.stopPropagation());
+      document.addEventListener('pointerdown', dismissHapticsTooltip);
+      hapticsTooltipCleanup = function() {
+        clearTimeout(hapticsTooltipHideTimer);
+        document.removeEventListener('pointerdown', dismissHapticsTooltip);
+        hapticsTooltip.remove();
+      };
+    }
+
     advanced_folder.add(guiControls, 'resetSettings').name('Reset all settings');
 
     pauseController = datGui.add(guiControls, 'paused').onChange(handlePause).name('Paused').listen();
@@ -5427,6 +6535,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       checkbox.insertAdjacentElement('afterend', icon);
     });
     datGui.width = 400;
+    mobileGuiHandleCleanup = setupMobileGuiHandle(datGui, toolController);
 
     setupDropdownWheelSelection();
 
@@ -5462,30 +6571,35 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     clockEl.className = 'simulation-clock';
     document.body.appendChild(clockEl);
     clockEl.innerHTML = `
-      <div class="simulation-clock-primary">
-        <span class="simulation-clock-time"></span>
-        <span class="simulation-clock-date"></span>
+      <div class="simulation-clock-left">
+        <div class="simulation-clock-primary">
+          <span class="simulation-clock-time"></span>
+          <span class="simulation-clock-date"></span>
+        </div>
       </div>
-      <div class="simulation-clock-detail">
-        <span>Running For</span>
-        <span class="simulation-clock-running-for"></span>
+      <div class="simulation-clock-right">
+        <div class="simulation-clock-detail">
+          <span>Running For</span>
+          <span class="simulation-clock-running-for"></span>
+        </div>
+        <div class="simulation-clock-detail">
+          <span class="simulation-clock-event-icon">
+            <svg data-solar-icon="sunrise" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+              <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4-4-4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+            </svg>
+            <svg data-solar-icon="sunset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4 4-4-4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+            </svg>
+          </span>
+          <span class="simulation-clock-solar-event"></span>
+          <span class="simulation-clock-solar-countdown"></span>
+        </div>
+        <div class="simulation-clock-detail simulation-clock-fps">
+          <span>FPS</span>
+          <span class="simulation-clock-fps-value">--</span>
+        </div>
       </div>
-      <div class="simulation-clock-detail">
-        <span class="simulation-clock-event-icon">
-          <svg data-solar-icon="sunrise" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
-            <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4-4-4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>
-          </svg>
-          <svg data-solar-icon="sunset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4 4-4-4"/><path d="M16 18a4 4 0 0 0-8 0"/>
-          </svg>
-        </span>
-        <span class="simulation-clock-solar-event"></span>
-        <span class="simulation-clock-solar-countdown"></span>
-      </div>
-      <div class="simulation-clock-detail simulation-clock-fps">
-        <span>FPS</span>
-        <span class="simulation-clock-fps-value">--</span>
-      </div>`;
+      `;
     clockTimeEl = clockEl.querySelector('.simulation-clock-time');
     clockDateEl = clockEl.querySelector('.simulation-clock-date');
     clockRunningForEl = clockEl.querySelector('.simulation-clock-running-for');
@@ -6090,6 +7204,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
 
   var middleMousePressed = false;
+  var cameraDragPressed = false;
   var leftMousePressed = false;
   var prevMouseX = 0;
   var prevMouseY = 0;
@@ -6147,7 +7262,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     if (!(guiControls.tool == 'TOOL_WALL_SEA' && leftMousePressed)) // lock y pos while drawing lake / sea
       mouseY = event.clientY - rect.top;
 
-    if (middleMousePressed) {
+    if (middleMousePressed || cameraDragPressed) {
       cam.changeViewXpos(((mouseX - prevMouseX) / cam.curZoom / canvas.width) * 2.0);
       cam.changeViewYpos(-((mouseY - prevMouseY) / cam.curZoom / canvas.width) * 2.0);
       prevMouseX = mouseX;
@@ -6159,10 +7274,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   graphCanvas.addEventListener('mousedown', function(e) { mouseDownEvent(e); });
 
 
-  function findSimYposAboveSurfaceAtMouseX() // find the lowest location that is not underground
+  function findSimYposAboveSurfaceAtMouseX(simX = mouseXinSim, simY = mouseYinSim) // find the lowest location that is not underground
   {
-    let simXpos = clamp(Math.floor(mouseXinSim * sim_res_x), 0, sim_res_x - 1);
-    let simYpos = clamp(Math.floor(mouseYinSim * sim_res_y), 0, sim_res_y - 1);
+    let simXpos = clamp(Math.floor(simX * sim_res_x), 0, sim_res_x - 1);
+    let simYpos = clamp(Math.floor(simY * sim_res_y), 0, sim_res_y - 1);
     // console.log(simYpos)
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, frameBuff_1);
@@ -6188,16 +7303,19 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     // event.preventDefault(); // caused problems with dat.gui
     // console.log('mousedown');
     if (e.button == 0) { // left
+      if (guiControls.tool == 'TOOL_CAMERA') {
+        cameraDragPressed = true;
+        leftMousePressed = false;
+        prevMouseX = mouseX;
+        prevMouseY = mouseY;
+        return;
+      }
+
       leftMousePressed = true;
       if (SETUP_MODE) {
         startSimulation();
       } else if (guiControls.tool == 'TOOL_STATION') {
-        let simXpos = Math.floor(mouseXinSim * sim_res_x);
-        let simYpos = findSimYposAboveSurfaceAtMouseX();
-
-        if (simXpos >= 0 && simXpos < sim_res_x && Number.isInteger(simYpos) &&
-            simYpos >= 0 && simYpos < sim_res_y)
-          weatherStations.push(new Weatherstation(simXpos, simYpos)); // add weather station
+        placeWeatherStationAtScreen(mouseX, mouseY);
       }
     } else if (e.button == 1) {
       // middle mouse button
@@ -6207,10 +7325,22 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     }
   }
 
+  function placeWeatherStationAtScreen(screenX, screenY)
+  {
+    const simX = screenToSimX(screenX);
+    const simY = screenToSimY(screenY);
+    const simXpos = Math.floor(simX * sim_res_x);
+    const simYpos = findSimYposAboveSurfaceAtMouseX(simX, simY);
+    if (simXpos >= 0 && simXpos < sim_res_x && Number.isInteger(simYpos) &&
+        simYpos >= 0 && simYpos < sim_res_y)
+      weatherStations.push(new Weatherstation(simXpos, simYpos));
+  }
+
 
   window.addEventListener('mouseup', function(event) {
     if (event.button == 0) {
       leftMousePressed = false;
+      cameraDragPressed = false;
     } else if (event.button == 1) {
       // middle mouse button
       middleMousePressed = false;
@@ -6223,20 +7353,61 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   var previousTouches;
 
 
-  canvas.addEventListener('touchstart', function(event) { event.preventDefault(); }, {passive : false});
+  canvas.addEventListener('touchstart', function(event) {
+    event.preventDefault();
+    const touches = Array.from(event.touches, touch => ({clientX : touch.clientX, clientY : touch.clientY}));
+    previousTouches = touches;
+    wasTwoFingerTouchBefore = touches.length > 1;
+    if (touches.length == 1) {
+      const rect = canvas.getBoundingClientRect();
+      mouseX = touches[0].clientX - rect.left;
+      mouseY = touches[0].clientY - rect.top;
+      ecosystemPointer.x = mouseX;
+      ecosystemPointer.y = mouseY;
+      cameraDragPressed = guiControls.tool == 'TOOL_CAMERA';
+      leftMousePressed = !cameraDragPressed;
+      prevMouseX = mouseX;
+      prevMouseY = mouseY;
+      if (!SETUP_MODE && guiControls.tool == 'TOOL_STATION')
+        placeWeatherStationAtScreen(mouseX, mouseY);
+    } else if (touches.length == 2) {
+      cameraDragPressed = false;
+      mouseX = (touches[0].clientX + touches[1].clientX) / 2;
+      mouseY = (touches[0].clientY + touches[1].clientY) / 2;
+      prevMouseX = mouseX;
+      prevMouseY = mouseY;
+      leftMousePressed = false;
+    } else {
+      leftMousePressed = false;
+    }
+  }, {passive : false});
 
   canvas.addEventListener('touchend', function(event) {
     event.preventDefault();
     if (event.touches.length == 0) { // all fingers released
       leftMousePressed = false;
+      cameraDragPressed = false;
+      const shouldStartSimulation = SETUP_MODE && !wasTwoFingerTouchBefore;
       //   }else if(event.touches.length == 1){
       wasTwoFingerTouchBefore = false;
-      previousTouches = null;
+      previousTouches = [];
 
-      if (SETUP_MODE) {
+      if (shouldStartSimulation) {
         startSimulation();
       }
+    } else if (event.touches.length == 1) {
+      leftMousePressed = false;
+      cameraDragPressed = false;
+      previousTouches = Array.from(event.touches, touch => ({clientX : touch.clientX, clientY : touch.clientY}));
     }
+  }, {passive : false});
+
+  canvas.addEventListener('touchcancel', function(event) {
+    event.preventDefault();
+    leftMousePressed = false;
+    cameraDragPressed = false;
+    wasTwoFingerTouchBefore = false;
+    previousTouches = [];
   }, {passive : false});
 
   canvas.addEventListener('touchmove', function(event) {
@@ -6244,11 +7415,22 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     if (event.touches.length == 1) { // single finger
 
-      // console.log(event.touches[0]);
       if (!wasTwoFingerTouchBefore) {
-        leftMousePressed = true; // treat just like holding left mouse button
-        mouseX = event.touches[0].clientX;
-        mouseY = event.touches[0].clientY;
+        const touchX = event.touches[0].clientX;
+        const touchY = event.touches[0].clientY;
+        if (guiControls.tool == 'TOOL_CAMERA') {
+          leftMousePressed = false;
+          cam.changeViewXpos(((touchX - prevMouseX) / cam.curZoom / canvas.width) * 2.0);
+          cam.changeViewYpos(-((touchY - prevMouseY) / cam.curZoom / canvas.width) * 2.0);
+        } else {
+          leftMousePressed = true; // treat just like holding left mouse button
+        }
+        mouseX = touchX;
+        mouseY = touchY;
+        prevMouseX = touchX;
+        prevMouseY = touchY;
+        ecosystemPointer.x = mouseX;
+        ecosystemPointer.y = mouseY;
       }
     } else {
       leftMousePressed = false;
@@ -6266,11 +7448,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         let curYsep = event.touches[0].clientY - event.touches[1].clientY;
         let curSep = Math.sqrt(curXsep * curXsep + curYsep * curYsep);
 
-        cam.zoomAtMousePos((curSep / prevSep) - 1.0);
+        if (prevSep > 0)
+          cam.zoomAtMousePos((curSep / prevSep) - 1.0);
 
         if (wasTwoFingerTouchBefore) {
-          cam.changeViewYpos(((mouseX - prevMouseX) / cam.curZoom / canvas.width) * 2.0);
-          cam.changeViewYpos(((mouseY - prevMouseY) / cam.curZoom / canvas.width) * 2.0);
+          cam.changeViewXpos(((mouseX - prevMouseX) / cam.curZoom / canvas.width) * 2.0);
+          cam.changeViewYpos(-((mouseY - prevMouseY) / cam.curZoom / canvas.width) * 2.0);
         }
         wasTwoFingerTouchBefore = true;
         prevMouseX = mouseX;
@@ -6278,7 +7461,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
     }
 
-    previousTouches = event.touches;
+    previousTouches = Array.from(event.touches, touch => ({clientX : touch.clientX, clientY : touch.clientY}));
   }, {passive : false});
 
 
@@ -6289,6 +7472,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     if (guiControls.paused) {
       soundSystem?.mute();
     }
+    updateMobilePauseDock();
   }
 
   document.addEventListener('keydown', (event) => {
@@ -7345,6 +8529,25 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     initial_T[y] = realToPotentialT(CtoK(realTemp), y); // initial temperature profile
   }
 
+  var soundingTextureData = new Float32Array(504 * 4);
+  soundingTextureData.set(initial_T, 0);
+  soundingTextureData.set(realWorldSounding_T, 504);
+  soundingTextureData.set(realWorldSounding_W, 1008);
+  soundingTextureData.set(realWorldSounding_Vel, 1512);
+
+  var soundingTexture = gl.createTexture();
+  if (!soundingTexture) {
+    throw new Error('Unable to allocate sounding profile texture');
+  }
+  gl.activeTexture(gl.TEXTURE15);
+  gl.bindTexture(gl.TEXTURE_2D, soundingTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, 504, 4, 0, gl.RED, gl.FLOAT, soundingTextureData);
+  gl.activeTexture(gl.TEXTURE0);
+
   cellHeight = guiControls.simHeight / sim_res_y; // in meters
 
   // Set constant uniforms
@@ -7353,25 +8556,18 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   gl.uniform2f(gl.getUniformLocation(setupProgram, 'resolution'), sim_res_x, sim_res_y);
   gl.uniform1f(gl.getUniformLocation(setupProgram, 'dryLapse'), dryLapse);
   gl.uniform1f(gl.getUniformLocation(setupProgram, 'simHeight'), guiControls.simHeight);
-
-  gl.uniform4fv(gl.getUniformLocation(setupProgram, 'initial_Tv'), initial_T);
+  gl.uniform1i(gl.getUniformLocation(setupProgram, 'soundingTex'), 15);
 
   gl.useProgram(advectionProgram);
   gl.uniform1i(gl.getUniformLocation(advectionProgram, 'baseTex'), 0);
   gl.uniform1i(gl.getUniformLocation(advectionProgram, 'waterTex'), 1);
   gl.uniform1i(gl.getUniformLocation(advectionProgram, 'wallTex'), 2);
+  gl.uniform1i(gl.getUniformLocation(advectionProgram, 'soundingTex'), 15);
   gl.uniform2f(gl.getUniformLocation(advectionProgram, 'texelSize'), texelSizeX, texelSizeY);
   gl.uniform2f(gl.getUniformLocation(advectionProgram, 'resolution'), sim_res_x, sim_res_y);
-  // gl.uniform1fv(
-  // gl.getUniformLocation(advectionProgram, 'initial_T'), initial_T);
-  gl.uniform4fv(gl.getUniformLocation(advectionProgram, 'initial_Tv'), initial_T);
   gl.uniform1f(gl.getUniformLocation(advectionProgram, 'dryLapse'), dryLapse);
   gl.uniform1f(gl.getUniformLocation(advectionProgram, 'waterTemperature'),
                CtoK(guiControls.waterTemperature)); // can be changed by GUI input
-
-  gl.uniform4fv(gl.getUniformLocation(advectionProgram, 'realWorldSounding_Tv'), realWorldSounding_T);
-  gl.uniform4fv(gl.getUniformLocation(advectionProgram, 'realWorldSounding_Wv'), realWorldSounding_W);
-  gl.uniform4fv(gl.getUniformLocation(advectionProgram, 'realWorldSounding_Velv'), realWorldSounding_Vel);
 
   gl.useProgram(pressureProgram);
   gl.uniform1i(gl.getUniformLocation(pressureProgram, 'baseTex'), 0);
@@ -7383,8 +8579,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   gl.uniform1i(gl.getUniformLocation(velocityProgram, 'wallTex'), 1);
   gl.uniform2f(gl.getUniformLocation(velocityProgram, 'texelSize'), texelSizeX, texelSizeY);
 
-  // gl.uniform1fv(gl.getUniformLocation(velocityProgram, 'initial_T'), initial_T);
-  gl.uniform4fv(gl.getUniformLocation(velocityProgram, 'initial_Tv'), initial_T);
+  gl.uniform1i(gl.getUniformLocation(velocityProgram, 'soundingTex'), 15);
 
   gl.useProgram(vorticityProgram);
   gl.uniform2f(gl.getUniformLocation(vorticityProgram, 'texelSize'), texelSizeX, texelSizeY);
@@ -7405,8 +8600,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   gl.uniform1f(gl.getUniformLocation(boundaryProgram, 'waterTemperature'),
                CtoK(guiControls.waterTemperature)); // can be changed by GUI input
   gl.uniform1f(gl.getUniformLocation(boundaryProgram, 'dryLapse'), dryLapse);
-  // gl.uniform1fv(gl.getUniformLocation(boundaryProgram, 'initial_T'), initial_T);
-  gl.uniform4fv(gl.getUniformLocation(boundaryProgram, 'initial_Tv'), initial_T);
+  gl.uniform1i(gl.getUniformLocation(boundaryProgram, 'soundingTex'), 15);
   gl.uniform1i(gl.getUniformLocation(boundaryProgram, 'allowCaves'), guiControls.allowCaves ? 1 : 0);
 
   gl.useProgram(curlProgram);
@@ -7582,8 +8776,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
   var srcVAO;
   var destTF;
-  let lastLightningSoundIteration = 0;
-  let lastLightningSoundCheckIteration = 0;
+  let lastLightningEventIteration = 0;
+  let lastLightningEventCheckIteration = 0;
   const lightningDataValues = new Float32Array(4);
 
   // preload uniform locations for tiny performance gain
@@ -7595,13 +8789,20 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
   setInterval(calcFps, 1000); // log fps
   setInterval(publishWeatherDataIfEnabled, 1000);
+  let resolveFirstRenderedFrame;
+  const firstRenderedFrame = new Promise(resolve => {
+    resolveFirstRenderedFrame = resolve;
+  });
   requestAnimationFrame(draw);
+  await firstRenderedFrame;
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   await loadingBar.set(100, 'Simulation ready');
   await new Promise(resolve => setTimeout(resolve, 350));
   await loadingBar.remove(true);
 
   function draw()
   { // Runs for every frame
+    updateGraphicsTransitions(performance.now());
     let camPanSpeed = guiControls.camSpeed;
 
     if (rightCtrlPressed) {
@@ -7672,6 +8873,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
           inputType = 1;
         else if (guiControls.tool == 'TOOL_WATER')
           inputType = 2;
+        else if (guiControls.tool == 'TOOL_UPDRAFT')
+          inputType = 6;
+        else if (guiControls.tool == 'TOOL_DOWNDRAFT')
+          inputType = 7;
         else if (guiControls.tool == 'TOOL_SMOKE')
           inputType = 3;
         else if (guiControls.tool == 'TOOL_WIND')
@@ -7722,6 +8927,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         gl.uniform1i(gl.getUniformLocation(advectionProgram, 'wholeWidthBrush'), guiControls.wholeWidth);
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'wholeWidthBrushWidth'), guiControls.wholeWidthBrushWidth * 0.01);
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'windPushVelocity'), msToRawVelocity(guiControls.windPushStrengthMph * 0.44704));
+        gl.uniform1f(
+          gl.getUniformLocation(advectionProgram, 'verticalAirVelocity'),
+          msToRawVelocity(guiControls.verticalAirStrengthMps)
+        );
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'windPushDirection'), guiControls.windPushDirection == 'left' ? -1.0 : 1.0);
         gl.uniform1i(gl.getUniformLocation(advectionProgram, 'windPushSetTemperature'), guiControls.windPushSetTemperature);
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'windPushAirTemperatureC'), guiControls.windPushAirTemperatureC);
@@ -7936,25 +9145,32 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
           airplane.move();
         }
 
-        if (guiControls.sound && guiControls.enablePrecipitation &&
-            iterNum != lastLightningSoundCheckIteration) {
-          lastLightningSoundCheckIteration = iterNum;
+        if (guiControls.enablePrecipitation && iterNum != lastLightningEventCheckIteration) {
+          lastLightningEventCheckIteration = iterNum;
           gl.bindFramebuffer(gl.FRAMEBUFFER, lightningDataFrameBuff);
           gl.readBuffer(gl.COLOR_ATTACHMENT0);
           gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, lightningDataValues);
 
           const lightningIteration = Math.round(lightningDataValues[2]);
-          if (lightningIteration > lastLightningSoundIteration && lightningIteration <= iterNum) {
-            soundSystem.soundThunder(
-              lightningDataValues[0],
-              lightningDataValues[1],
-              Math.pow(lightningDataValues[3], 2.0)
-            );
-            lastLightningSoundIteration = lightningIteration;
+          if (lightningIteration > lastLightningEventIteration && lightningIteration <= iterNum) {
+            const lightningIntensity = clamp(lightningDataValues[3], 0, 4);
+            const thunderIntensity = Math.pow(lightningIntensity, 2.0);
+            const {distance, soundDelay} = getThunderTravel(lightningDataValues[0], lightningDataValues[1]);
+            const distanceScaledHapticStrength = lightningIntensity / (1 + distance / 20000);
+            triggerWeatherHaptic(distanceScaledHapticStrength);
+            triggerWeatherHaptic(distanceScaledHapticStrength, soundDelay);
+            if (guiControls.sound) {
+              soundSystem.soundThunder(
+                lightningDataValues[0],
+                lightningDataValues[1],
+                thunderIntensity
+              );
+            }
+            lastLightningEventIteration = lightningIteration;
           }
         } else {
-          lastLightningSoundIteration = iterNum;
-          lastLightningSoundCheckIteration = iterNum;
+          lastLightningEventIteration = iterNum;
+          lastLightningEventCheckIteration = iterNum;
         }
 
       } // end of simulation part
@@ -7970,6 +9186,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     windPushControlsVisibilityUpdater();
     if (guiControls.tool == 'TOOL_WIND_PUSH') {
       cursorType = 3.0; // configurable wind push area
+    } else if (guiControls.tool == 'TOOL_CAMERA') {
+      cursorType = 0.0;
     } else if (guiControls.wholeWidth) {
       cursorType = 2.0;   // cursor whole width brush
     } else if (SETUP_MODE || (inputType <= 0 && !bPressed && (guiControls.tool == 'TOOL_NONE' || guiControls.tool == 'TOOL_STATION'))) {
@@ -8054,7 +9272,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     }
 
     const currentTemporalView = [cam.curXpos, cam.curYpos, cam.curZoom];
-    if (!guiControls.temporalAAEnabled || SETUP_MODE || guiControls.displayMode != 'DISP_REAL' ||
+    if (graphicsEffectWeights.temporalAA < 0.001 || SETUP_MODE || guiControls.displayMode != 'DISP_REAL' ||
         temporalPreviousDisplayMode != guiControls.displayMode ||
         !temporalPreviousView ||
         currentTemporalView.some((value, index) => value != temporalPreviousView[index])) {
@@ -8160,7 +9378,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       gl.uniform1f(gl.getUniformLocation(skyBackgroundDisplayProgram, 'Xmult'), horizontalDisplayMult);
       gl.uniform1f(gl.getUniformLocation(skyBackgroundDisplayProgram, 'iterNum'), iterNum);
       gl.uniform1f(gl.getUniformLocation(skyBackgroundDisplayProgram, 'sunAngle'), (guiControls.sunAngle - 90.0) * degToRad);
-      gl.uniform1i(gl.getUniformLocation(skyBackgroundDisplayProgram, 'extremeAtmosphere'), guiControls.volumetricCloudLighting);
+      gl.uniform1f(
+        gl.getUniformLocation(skyBackgroundDisplayProgram, 'extremeAtmosphereMix'),
+        graphicsEffectWeights.volumetricCloudLighting
+      );
 
       gl.drawBuffers([ gl.COLOR_ATTACHMENT0 ]);
 
@@ -8184,7 +9405,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       } else {
         gl.uniform1f(gl.getUniformLocation(realisticDisplayProgram, 'displayVectorField'), 0.0);
       }
-      gl.uniform1i(gl.getUniformLocation(realisticDisplayProgram, 'volumetricCloudLighting'), guiControls.volumetricCloudLighting);
+      gl.uniform1f(
+        gl.getUniformLocation(realisticDisplayProgram, 'volumetricCloudLightingMix'),
+        graphicsEffectWeights.volumetricCloudLighting
+      );
 
 
       let lightningTexNum = Math.floor(iterNum / 400) % numLightningTextures;
@@ -8207,7 +9431,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
       gl.bindVertexArray(postProcessingVao);
 
-      if (guiControls.bloomEnabled) {
+      if (graphicsEffectWeights.bloom > 0.001) {
       gl.useProgram(isolateBrightPartsProgram);
 
       gl.activeTexture(gl.TEXTURE0);
@@ -8279,10 +9503,11 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, temporalHistoryTexture);
-      gl.uniform1i(gl.getUniformLocation(postProcessingProgram, 'bloomEnabled'), guiControls.bloomEnabled);
-      gl.uniform1i(gl.getUniformLocation(postProcessingProgram, 'toneMappingEnabled'), guiControls.filmicToneMapping);
-      gl.uniform1i(gl.getUniformLocation(postProcessingProgram, 'fxaaEnabled'), guiControls.fxaaEnabled);
-      gl.uniform1i(gl.getUniformLocation(postProcessingProgram, 'temporalAAEnabled'), guiControls.temporalAAEnabled);
+      gl.uniform1f(gl.getUniformLocation(postProcessingProgram, 'bloomMix'), graphicsEffectWeights.bloom);
+      gl.uniform1f(gl.getUniformLocation(postProcessingProgram, 'toneMappingMix'), graphicsEffectWeights.toneMapping);
+      gl.uniform1f(gl.getUniformLocation(postProcessingProgram, 'fxaaMix'), graphicsEffectWeights.fxaa);
+      gl.uniform1f(gl.getUniformLocation(postProcessingProgram, 'temporalAAMix'), graphicsEffectWeights.temporalAA);
+      gl.uniform1f(gl.getUniformLocation(postProcessingProgram, 'eyeFriendlyMix'), graphicsEffectWeights.eyeFriendly);
       gl.uniform1i(gl.getUniformLocation(postProcessingProgram, 'temporalHistoryValid'), temporalHistoryValid);
       gl.uniform2f(gl.getUniformLocation(postProcessingProgram, 'outputTexelSize'), 1.0 / canvas.width, 1.0 / canvas.height);
 
@@ -8298,7 +9523,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       gl.drawBuffers([ gl.BACK ]);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); // draw to canvas
 
-      if (guiControls.temporalAAEnabled && !SETUP_MODE) {
+      if (graphicsEffectWeights.temporalAA > 0.001 && !SETUP_MODE) {
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D, temporalHistoryTexture);
         gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, canvas.width, canvas.height);
@@ -8550,6 +9775,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     updateDiagnosticOverlays();
     frameNum++;
+    if (resolveFirstRenderedFrame) {
+      resolveFirstRenderedFrame();
+      resolveFirstRenderedFrame = null;
+    }
     requestAnimationFrame(draw);
   }
 

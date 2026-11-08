@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - beta
   workflow_dispatch:
 
 permissions:
@@ -23,13 +24,21 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
+      - name: Check out production source
         uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main
+      - name: Check out beta source
+        uses: actions/checkout@v4
+        with:
+          ref: beta
+          path: beta
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
-      - name: Prepare Pages artifact
+      - name: Prepare production Pages files
         run: |
           mkdir _site
           rsync -a \
@@ -38,7 +47,17 @@ jobs:
             --exclude='.vscode' \
             --exclude='saves' \
             --exclude='_site' \
-            ./ _site/
+            main/ _site/
+      - name: Add beta site at /beta/
+        run: |
+          mkdir _site/beta
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.vscode' \
+            --exclude='saves' \
+            --exclude='_site' \
+            beta/ _site/beta/
       - name: Upload site files
         uses: actions/upload-pages-artifact@v3
         with:

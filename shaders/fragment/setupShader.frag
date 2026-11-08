@@ -11,9 +11,9 @@ uniform float simHeight;
 uniform float seed;
 uniform float heightMult;
 
-uniform vec4 initial_Tv[126];
+uniform highp sampler2D soundingTex;
 
-float getInitialT(int y) { return initial_Tv[y / 4][y % 4]; }
+float getInitialT(int y) { return texelFetch(soundingTex, ivec2(clamp(y, 0, 503), 0), 0).r; }
 
 in vec2 texCoord;
 in vec2 fragCoord;

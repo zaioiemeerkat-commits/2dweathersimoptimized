@@ -19,11 +19,12 @@ uniform sampler2D hdrTex;
 uniform sampler2D bloomTex;
 uniform sampler2D historyTex;
 uniform vec2 outputTexelSize;
-uniform bool bloomEnabled;
-uniform bool toneMappingEnabled;
-uniform bool fxaaEnabled;
-uniform bool temporalAAEnabled;
+uniform float bloomMix;
+uniform float toneMappingMix;
+uniform float fxaaMix;
+uniform float temporalAAMix;
 uniform bool temporalHistoryValid;
+uniform float eyeFriendlyMix;
 out vec4 fragmentColor;
 
 
@@ -37,13 +38,15 @@ float luminance(vec3 color)
 vec3 mappedColor(vec2 uv)
 {
   vec3 color = texture(hdrTex, uv).rgb;
-  if (bloomEnabled)
-    color += texture(bloomTex, uv).rgb * 0.990;
+  color += texture(bloomTex, uv).rgb * 0.990 * bloomMix;
 
   color *= exposure;
-  if (toneMappingEnabled) {
-    color = clamp((color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14), 0.0, 1.0);
-  }
+  vec3 toneMappedColor = clamp(
+    (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14),
+    0.0,
+    1.0
+  );
+  color = mix(color, toneMappedColor, toneMappingMix);
   return pow(max(color, vec3(0.0)), ONE_OVER_GAMMA);
 }
 
@@ -51,7 +54,7 @@ void main()
 {
   vec3 outputCol = mappedColor(texCoord);
 
-  if (temporalAAEnabled && temporalHistoryValid) {
+  if (temporalAAMix > 0.001 && temporalHistoryValid) {
     vec3 neighborhoodMin = outputCol;
     vec3 neighborhoodMax = outputCol;
     neighborhoodMin = min(neighborhoodMin, mappedColor(texCoord - vec2(outputTexelSize.x, 0.0)));
@@ -66,11 +69,11 @@ void main()
     vec3 historyColor = clamp(texture(historyTex, texCoord).rgb, neighborhoodMin, neighborhoodMax);
     float historyDifference = max(max(abs(outputCol.r - historyColor.r), abs(outputCol.g - historyColor.g)),
                                   abs(outputCol.b - historyColor.b));
-    float historyWeight = 0.12 * (1.0 - smoothstep(0.025, 0.12, historyDifference));
+    float historyWeight = 0.12 * (1.0 - smoothstep(0.025, 0.12, historyDifference)) * temporalAAMix;
     outputCol = mix(outputCol, historyColor, historyWeight);
   }
 
-  if (fxaaEnabled) {
+  if (fxaaMix > 0.001) {
     vec2 pixel = outputTexelSize;
     vec3 northWest = mappedColor(texCoord + vec2(-pixel.x, pixel.y));
     vec3 northEast = mappedColor(texCoord + vec2(pixel.x, pixel.y));
@@ -97,9 +100,12 @@ void main()
       vec3 edgeB = edgeA * 0.5 + 0.25 * (mappedColor(texCoord + direction * -0.5) +
                                          mappedColor(texCoord + direction * 0.5));
       float edgeBLuma = luminance(edgeB);
-      outputCol = edgeBLuma < minLuma || edgeBLuma > maxLuma ? edgeA : edgeB;
+      vec3 fxaaColor = edgeBLuma < minLuma || edgeBLuma > maxLuma ? edgeA : edgeB;
+      outputCol = mix(outputCol, fxaaColor, fxaaMix);
     }
   }
+
+  outputCol *= mix(1.0, 0.55, eyeFriendlyMix);
 
   /*
     { // Gamma correction test: left without, right with gamma correction

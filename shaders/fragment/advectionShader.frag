@@ -26,6 +26,7 @@ uniform vec4 userInputValues; // xpos    Ypos     intensity     Brush Size
 uniform bool wholeWidthBrush;
 uniform float wholeWidthBrushWidth;
 uniform float windPushVelocity;
+uniform float verticalAirVelocity;
 uniform float windPushDirection;
 uniform bool windPushSetTemperature;
 uniform float windPushAirTemperatureC;
@@ -60,26 +61,23 @@ uniform vec2 resolution;
 
 vec2 texelSize;
 
-uniform vec4 initial_Tv[126];
-uniform vec4 realWorldSounding_Tv[126];
-uniform vec4 realWorldSounding_Wv[126];
-uniform vec4 realWorldSounding_Velv[126];
+uniform highp sampler2D soundingTex;
 
-float getInitialT(int y) { return initial_Tv[y / 4][y % 4]; }
+float getInitialT(int y) { return texelFetch(soundingTex, ivec2(clamp(y, 0, 503), 0), 0).r; }
 float getRealWorldSounding_T(int y) {
   int upper = clamp(y, 0, 503);
   int lower = clamp(y - 1, 0, 503);
-  return (realWorldSounding_Tv[upper / 4][upper % 4] + realWorldSounding_Tv[lower / 4][lower % 4]) / 2.;
+  return (texelFetch(soundingTex, ivec2(upper, 1), 0).r + texelFetch(soundingTex, ivec2(lower, 1), 0).r) / 2.;
 }
 float getRealWorldSounding_W(int y) {
   int upper = clamp(y, 0, 503);
   int lower = clamp(y - 1, 0, 503);
-  return (realWorldSounding_Wv[upper / 4][upper % 4] + realWorldSounding_Wv[lower / 4][lower % 4]) / 2.;
+  return (texelFetch(soundingTex, ivec2(upper, 2), 0).r + texelFetch(soundingTex, ivec2(lower, 2), 0).r) / 2.;
 }
 float getRealWorldSounding_Vel(int y) {
   int upper = clamp(y, 0, 503);
   int lower = clamp(y - 1, 0, 503);
-  return (realWorldSounding_Velv[upper / 4][upper % 4] + realWorldSounding_Velv[lower / 4][lower % 4]) / 2.;
+  return (texelFetch(soundingTex, ivec2(upper, 3), 0).r + texelFetch(soundingTex, ivec2(lower, 3), 0).r) / 2.;
 }
 
 #include "common.glsl"
@@ -325,6 +323,15 @@ void main()
         water[TOTAL] = maxWater(pushAirTemperature) * windPushRelativeHumidity;
         water[CLOUD] = min(water[CLOUD], water[TOTAL]);
       }
+    } else if ((userInputType == 6 || userInputType == 7) && wall[DISTANCE] != 0) {
+      float verticalAirWeight = weight;
+      if (wholeWidthBrush) {
+        float distanceFromBandCenter = abs(userInputValues.y - texCoord.y);
+        float halfBandHeight = userInputValues[BRUSH_SIZE] * texelSize.y;
+        verticalAirWeight = 1.0 - smoothstep(halfBandHeight * 0.65, halfBandHeight, distanceFromBandCenter);
+      }
+      float targetVerticalVelocity = userInputType == 6 ? verticalAirVelocity : -verticalAirVelocity;
+      base[VY] = mix(base[VY], targetVerticalVelocity, 0.04 * verticalAirWeight);
     } else if (userInputType >= 10) {               // wall
       if (userInputValues[BRUSH_INTENSITY] > 0.0) { // build wall if positive value else remove wall
 

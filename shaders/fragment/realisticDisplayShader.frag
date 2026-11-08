@@ -50,7 +50,7 @@ uniform vec4 cursor; // Xpos   Ypos  Size   type
 uniform float displayVectorField;
 
 uniform float iterNum;
-uniform bool volumetricCloudLighting;
+uniform float volumetricCloudLightingMix;
 
 out vec4 fragmentColor;
 
@@ -233,7 +233,7 @@ vec4 getAirColor(vec2 fragCoordIn)
   // float cloudOpacity = clamp(cloudwater * 4.0, 0.0, 1.0);
   float cloudOpacity = clamp(1.0 - (1.0 / (1. + totalDensity)), 0.0, 1.0);
 
-  if (volumetricCloudLighting && cloudOpacity > 0.01) {
+  if (volumetricCloudLightingMix > 0.001 && cloudOpacity > 0.01) {
     vec2 sunDirection = vec2(cos(sunAngle), sin(sunAngle));
     float opticalDepth = 0.0;
     for (int rayStep = 1; rayStep <= 6; rayStep++) {
@@ -264,7 +264,7 @@ vec4 getAirColor(vec2 fragCoordIn)
     vec3 shadedCloud = cloudCol * mix(vec3(0.48, 0.59, 0.76), sunlightTint,
                                       0.28 + 0.72 * lightTransmission);
     shadedCloud += sunlightTint * rimLight * 0.65;
-    cloudCol = mix(cloudCol, shadedCloud, 0.9);
+    cloudCol = mix(cloudCol, shadedCloud, 0.9 * volumetricCloudLightingMix);
   }
 
   const vec3 smokeThinCol = vec3(0.8, 0.51, 0.26);

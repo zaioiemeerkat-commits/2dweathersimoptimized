@@ -22,7 +22,7 @@ uniform float iterNum;
 
 uniform float simHeight;
 uniform float sunAngle;
-uniform bool extremeAtmosphere;
+uniform float extremeAtmosphereMix;
 
 uniform vec2 planeDirectionAndGearPos;
 
@@ -145,7 +145,7 @@ void main()
   float val = pow(map_rangeC(texCoord.y, 0., 3.2, 1.0, 0.05), 5.0); // pow 5 map 1.0 to 0.1
 
   vec3 mixedCol = hsv2rgb(vec3(hue, sat, val));                     // blue air
-  if (extremeAtmosphere) {
+  if (extremeAtmosphereMix > 0.001) {
     float solarElevation = cos(sunAngle);
     float nightFactor = 1.0 - smoothstep(-0.12, 0.18, solarElevation);
     float twilight = (1.0 - nightFactor) * (1.0 - smoothstep(0.18, 0.72, solarElevation));
@@ -155,7 +155,7 @@ void main()
     vec3 atmosphereColor = mix(horizonColor, zenithColor, skyHeight);
     float haze = exp(-max(texCoord.y, 0.0) * 1.25);
     atmosphereColor += vec3(1.0, 0.57, 0.31) * haze * twilight * 0.16;
-    mixedCol = mix(mixedCol, atmosphereColor, 0.88);
+    mixedCol = mix(mixedCol, atmosphereColor, 0.88 * extremeAtmosphereMix);
   }
 
   vec3 airplaneLights = vec3(0.0);

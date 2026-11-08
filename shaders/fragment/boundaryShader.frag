@@ -27,10 +27,10 @@ uniform float vorticity;
 uniform float waterEvaporation;
 uniform float landEvaporation;
 uniform float waterWeight;
-uniform vec4 initial_Tv[126];
+uniform highp sampler2D soundingTex;
 uniform bool allowCaves;
 
-float getInitialT(int y) { return initial_Tv[y / 4][y % 4]; }
+float getInitialT(int y) { return texelFetch(soundingTex, ivec2(clamp(y, 0, 503), 0), 0).r; }
 
 uniform float sunAngle;
 

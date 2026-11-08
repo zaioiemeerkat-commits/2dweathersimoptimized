@@ -18,9 +18,9 @@ uniform float wind;
 uniform vec2 texelSize;
 // uniform vec2 resolution;
 
-uniform vec4 initial_Tv[126];
+uniform highp sampler2D soundingTex;
 
-float getInitialT(int y) { return initial_Tv[y / 4][y % 4]; }
+float getInitialT(int y) { return texelFetch(soundingTex, ivec2(clamp(y, 0, 503), 0), 0).r; }
 
 layout(location = 0) out vec4 base;
 layout(location = 2) out ivec4 wall;

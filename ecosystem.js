@@ -324,8 +324,8 @@ class PlantEcosystem
       if (!sprite)
         continue;
 
-      const height = Math.max(7, cellPixels * plant.species.height * plant.biomass *
-        (1 - plant.windDamage * 0.4));
+      const height = cellPixels * plant.species.height * plant.biomass *
+        (1 - plant.windDamage * 0.4);
       const width = height * sprite.width / sprite.height;
       const screenY = projectY(site.y + 0.5);
       const gust = Math.sin(timeSeconds * 2.1 + site.x * 0.17 + site.y * 0.11) *
