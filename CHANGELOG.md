@@ -44,6 +44,11 @@ it is a safety guide, not a guarantee of performance.
 - Added **Updraft (Rising Air)** and **Downdraft (Sinking Air)** tools. They
   gently steer air vertically inside the brush, default to 1 m/s, and are
   limited to 5 m/s to avoid abrupt changes to the flow.
+- Added **Uninterrupted Mode** to Wind Push, feathering the pushed band's
+  edges, limiting temperature changes to 0.5 K per simulated hour, and
+  adjusting vapor to preserve relative humidity as temperature changes.
+  Optional humidity overrides also blend over simulated time and preserve
+  existing cloud water.
 - Improved mobile interactions so multi-finger camera gestures do not also
   apply the selected simulation tool.
 - Improved placement of weather stations by resolving the intended

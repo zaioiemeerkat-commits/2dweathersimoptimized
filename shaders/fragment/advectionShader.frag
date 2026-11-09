@@ -28,6 +28,8 @@ uniform float wholeWidthBrushWidth;
 uniform float windPushVelocity;
 uniform float verticalAirVelocity;
 uniform float windPushDirection;
+uniform bool windPushUninterrupted;
+uniform float windPushUninterruptedStep;
 uniform bool windPushSetTemperature;
 uniform float windPushAirTemperatureC;
 uniform bool windPushSetHumidity;
@@ -250,11 +252,23 @@ void main()
 
   bool inBrush = false;           // if cell is in brush area
   float weight = 1.0;             // 1.0 at center, 0.0 at border
+  float windPushBlendWeight = 1.0;
 
   if (userInputType == 5) {
     float horizontalDist = wrapHorizontally ? absHorizontalDist(userInputValues.x, texCoord.x) : abs(userInputValues.x - texCoord.x);
-    if (horizontalDist < windPushWidth * 0.5 && abs(userInputValues.y - texCoord.y) < windPushDepth * 0.5)
+    float verticalDist = abs(userInputValues.y - texCoord.y);
+    float halfWidth = windPushWidth * 0.5;
+    float halfDepth = windPushDepth * 0.5;
+    if (horizontalDist < halfWidth && verticalDist < halfDepth) {
       inBrush = true;
+      if (windPushUninterrupted) {
+        float horizontalFeather = min(halfWidth, max(windPushWidth * 0.075, texelSize.x));
+        float verticalFeather = min(halfDepth, max(windPushDepth * 0.15, texelSize.y));
+        float horizontalWeight = smoothstep(0.0, horizontalFeather, halfWidth - horizontalDist);
+        float verticalWeight = smoothstep(0.0, verticalFeather, halfDepth - verticalDist);
+        windPushBlendWeight = min(horizontalWeight, verticalWeight);
+      }
+    }
   } else if (wholeWidthBrush) {
     float horizontalDist = wrapHorizontally ? absHorizontalDist(userInputValues.x, texCoord.x) : abs(userInputValues.x - texCoord.x);
     if ((wholeWidthBrushWidth >= 1.0 || horizontalDist < wholeWidthBrushWidth * 0.5) &&
@@ -315,12 +329,41 @@ void main()
         base.xy += userInputMove * 5.0 * weight * userInputValues[BRUSH_INTENSITY];
       }
     } else if (userInputType == 5) { // wind push
-      base.x = windPushVelocity * windPushDirection;
-      if (windPushSetTemperature)
-        base[TEMPERATURE] = realToPotentialT(CtoK(windPushAirTemperatureC));
+      float targetVelocity = windPushVelocity * windPushDirection;
+      if (windPushUninterrupted) {
+        float blend = 0.04 * windPushBlendWeight;
+        base.x = mix(base.x, targetVelocity, blend);
+        if (windPushSetTemperature) {
+          float previousRealTemperature = potentialToRealT(base[TEMPERATURE]);
+          float previousSaturation = maxWater(previousRealTemperature);
+          float currentVapor = max(water[TOTAL] - water[CLOUD], 0.0);
+          float relativeHumidity = currentVapor / max(previousSaturation, 0.000001);
+          float targetTemperature = realToPotentialT(CtoK(windPushAirTemperatureC));
+          float maxTemperatureStep = windPushUninterruptedStep * windPushBlendWeight;
+          base[TEMPERATURE] += clamp(
+            targetTemperature - base[TEMPERATURE],
+            -maxTemperatureStep,
+            maxTemperatureStep
+          );
+          float updatedSaturation = maxWater(potentialToRealT(base[TEMPERATURE]));
+          water[TOTAL] = water[CLOUD] + relativeHumidity * updatedSaturation;
+        }
+      } else {
+        base.x = targetVelocity;
+        if (windPushSetTemperature)
+          base[TEMPERATURE] = realToPotentialT(CtoK(windPushAirTemperatureC));
+      }
       if (windPushSetHumidity) {
         float pushAirTemperature = potentialToRealT(base[TEMPERATURE]);
-        water[TOTAL] = maxWater(pushAirTemperature) * windPushRelativeHumidity;
+        float targetHumidity = maxWater(pushAirTemperature) * windPushRelativeHumidity;
+        if (windPushUninterrupted)
+          water[TOTAL] = mix(
+            water[TOTAL],
+            water[CLOUD] + targetHumidity,
+            windPushUninterruptedStep * windPushBlendWeight
+          );
+        else
+          water[TOTAL] = targetHumidity;
         water[CLOUD] = min(water[CLOUD], water[TOTAL]);
       }
     } else if ((userInputType == 6 || userInputType == 7) && wall[DISTANCE] != 0) {

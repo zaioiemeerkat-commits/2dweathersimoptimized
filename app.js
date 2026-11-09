@@ -625,6 +625,7 @@ const guiControls_default = {
   verticalAirStrengthMps : 1.0,
   windPushStrengthMph : 50,
   windPushDirection : 'right',
+  windPushUninterrupted : false,
   windPushSetTemperature : false,
   windPushAirTemperatureC : 15,
   windPushSetHumidity : false,
@@ -5511,6 +5512,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       guiControls.bloomQuality = '50%';
     if (!['right', 'left'].includes(guiControls.windPushDirection))
       guiControls.windPushDirection = 'right';
+    guiControls.windPushUninterrupted = guiControls.windPushUninterrupted === true;
     guiControls.verticalAirStrengthMps = clamp(Number(guiControls.verticalAirStrengthMps) || 0, 0, 5);
     guiControls.windPushSetTemperature = guiControls.windPushSetTemperature === true;
     guiControls.windPushAirTemperatureC = clamp(Number(guiControls.windPushAirTemperatureC) || 0, -40, 50);
@@ -5659,8 +5661,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       UI_folder.add(guiControls, 'windPushDirection', {
         'Toward Right' : 'right',
         'Toward Left' : 'left'
-      }).name('Wind Push Direction')
+      }).name('Wind Push Direction'),
+      UI_folder.add(guiControls, 'windPushUninterrupted')
+        .name('Uninterrupted Mode')
     ];
+    windPushControllers[2].domElement.closest('li').title =
+      'Feathers the wind band edges, limits temperature adjustment to 0.5 K per simulated hour, and preserves relative humidity as temperature changes.';
     const windPushRows = windPushControllers.map(controller => {
       const row = controller.domElement.closest('li');
       row.classList.add('wind-push-strength-row', 'wind-push-strength-collapsed');
@@ -8927,6 +8933,11 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         gl.uniform1i(gl.getUniformLocation(advectionProgram, 'wholeWidthBrush'), guiControls.wholeWidth);
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'wholeWidthBrushWidth'), guiControls.wholeWidthBrushWidth * 0.01);
         gl.uniform1f(gl.getUniformLocation(advectionProgram, 'windPushVelocity'), msToRawVelocity(guiControls.windPushStrengthMph * 0.44704));
+        gl.uniform1i(gl.getUniformLocation(advectionProgram, 'windPushUninterrupted'), guiControls.windPushUninterrupted);
+        gl.uniform1f(
+          gl.getUniformLocation(advectionProgram, 'windPushUninterruptedStep'),
+          0.5 * timePerIteration
+        );
         gl.uniform1f(
           gl.getUniformLocation(advectionProgram, 'verticalAirVelocity'),
           msToRawVelocity(guiControls.verticalAirStrengthMps)
