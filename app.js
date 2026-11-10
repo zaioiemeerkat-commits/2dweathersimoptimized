@@ -2218,7 +2218,7 @@ function setupLanSharedSaveMenu()
 {
   const container = document.getElementById('lanSharedSaveButtons');
   const relayUrl = window.WEATHER_SAVE_RELAY_URL?.replace(/\/+$/, '');
-  if (!container || !relayUrl || !window.matchMedia('(max-width: 700px)').matches)
+  if (!container || !relayUrl)
     return;
 
   let shares = [];
