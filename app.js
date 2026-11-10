@@ -9,6 +9,80 @@ details. You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
+if (window.matchMedia('(pointer: coarse) and (hover: none), (max-width: 600px)').matches) {
+  let fullscreenRequestPending = false;
+  let fullscreenButton;
+
+  const showFullscreenButton = function() {
+    if (fullscreenButton)
+      return;
+
+    fullscreenButton = document.createElement('button');
+    fullscreenButton.type = 'button';
+    fullscreenButton.textContent = 'Enter fullscreen';
+    fullscreenButton.setAttribute('aria-label', 'Enter fullscreen mode');
+    fullscreenButton.title = 'If fullscreen is unavailable in this browser tab, open the page as an installed app.';
+    Object.assign(fullscreenButton.style, {
+      position : 'fixed',
+      bottom : 'max(16px, env(safe-area-inset-bottom))',
+      left : '50%',
+      transform : 'translateX(-50%)',
+      zIndex : '10010',
+      padding : '12px 18px',
+      border : '1px solid rgba(255, 255, 255, 0.35)',
+      borderRadius : '999px',
+      background : 'rgba(18, 25, 35, 0.88)',
+      color : '#fff',
+      font : '600 14px "Plus Jakarta Sans", sans-serif',
+      boxShadow : '0 4px 18px rgba(0, 0, 0, 0.35)'
+    });
+    fullscreenButton.addEventListener('click', requestMobileFullscreen);
+    document.body.appendChild(fullscreenButton);
+  };
+
+  const requestMobileFullscreen = function() {
+    if (document.fullscreenElement || fullscreenRequestPending)
+      return;
+
+    const root = document.documentElement;
+    const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (typeof requestFullscreen != 'function') {
+      showFullscreenButton();
+      return;
+    }
+
+    fullscreenRequestPending = true;
+    try {
+      const request = requestFullscreen.call(root);
+      if (request && typeof request.then == 'function') {
+        request.then(function() {
+          fullscreenRequestPending = false;
+        }, function(error) {
+          fullscreenRequestPending = false;
+          console.warn('Could not enter fullscreen:', error);
+          showFullscreenButton();
+        });
+      } else {
+        fullscreenRequestPending = false;
+      }
+    } catch (error) {
+      fullscreenRequestPending = false;
+      console.warn('Could not enter fullscreen:', error);
+      showFullscreenButton();
+    }
+  };
+
+  document.addEventListener('fullscreenchange', function() {
+    if (document.fullscreenElement) {
+      fullscreenRequestPending = false;
+      fullscreenButton?.remove();
+      fullscreenButton = null;
+    }
+  });
+  document.addEventListener('pointerup', requestMobileFullscreen, true);
+  document.addEventListener('click', requestMobileFullscreen, true);
+}
+
 function getEstimatedSimulationCapacity()
 {
   const deviceMemory = navigator.deviceMemory;
@@ -5770,6 +5844,24 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         alert('Could not create a save to share: ' + (error instanceof Error ? error.message : String(error)));
       }
     };
+    guiControls.toggleFullscreen = async function() {
+      const fullscreenElement = document.fullscreenElement || document.webkitFullscreenElement;
+      const fullscreenRoot = document.documentElement;
+      const toggleFullscreen = fullscreenElement
+        ? document.exitFullscreen || document.webkitExitFullscreen
+        : fullscreenRoot.requestFullscreen || fullscreenRoot.webkitRequestFullscreen;
+      if (typeof toggleFullscreen != 'function') {
+        alert('Fullscreen is not supported by this browser. Use the browser fullscreen controls instead.');
+        return;
+      }
+
+      try {
+        await toggleFullscreen.call(fullscreenElement ? document : fullscreenRoot);
+      } catch (error) {
+        console.warn('Could not toggle fullscreen mode:', error);
+        alert('Could not toggle fullscreen mode: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    };
 
     guiControls.resetSettings = function() {
       if (confirm('Are you sure you want to reset all settings to default?')) {
@@ -6744,6 +6836,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     pauseController = datGui.add(guiControls, 'paused').onChange(handlePause).name('Paused').listen();
     datGui.add(guiControls, 'download').name('Save Simulation to File');
     datGui.add(guiControls, 'share').name('Share Simulation with Device');
+    datGui.add(guiControls, 'toggleFullscreen').name('Toggle Fullscreen');
     datGui.domElement.querySelectorAll('.cr.boolean .c input[type="checkbox"]').forEach(function(checkbox) {
       const icon = document.createElement('span');
       icon.className = 'gui-heroicon-check';
