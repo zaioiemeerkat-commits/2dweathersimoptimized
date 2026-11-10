@@ -5206,6 +5206,25 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     if (closeButton)
       closeButton.hidden = true;
 
+    function updateLandscapeGuiHeight()
+    {
+      if (!landscapeQuery.matches)
+        return;
+
+      const rowsHeight = Array.from(controlsList.children).reduce(
+        (height, row) => height + row.getBoundingClientRect().height, 0
+      );
+      main.style.setProperty('--mobile-gui-landscape-height',
+        Math.min(window.innerHeight, rowsHeight + 2) + 'px');
+    }
+
+    const landscapeGuiHeightObserver = typeof ResizeObserver == 'function' ?
+      new ResizeObserver(updateLandscapeGuiHeight) : null;
+    if (landscapeGuiHeightObserver) {
+      Array.from(controlsList.children).forEach(row => landscapeGuiHeightObserver.observe(row));
+    }
+    updateLandscapeGuiHeight();
+
     const quickDock = document.createElement('div');
     quickDock.className = 'mobile-quick-dock';
     quickDock.setAttribute('role', 'group');
@@ -5472,6 +5491,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
 
       main.dataset.mobileUiState = nextState;
+      if (landscape)
+        updateLandscapeGuiHeight();
       hideQuickHint();
       const stateIndex = states.indexOf(nextState);
       const vibration = stateIndex == 0 ? [12, 28, 20] : stateIndex == 1 ? [10] : [8, 55, 5, 55, 3];
@@ -5638,6 +5659,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
       if (landscape && main.dataset.mobileUiState == 'half')
         setState('full');
+      updateLandscapeGuiHeight();
       scheduleQuickToolSelectionUpdate();
     }
 
@@ -5660,6 +5682,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         cancelAnimationFrame(quickSelectionUpdateFrame);
       if (quickDockResizeObserver)
         quickDockResizeObserver.disconnect();
+      if (landscapeGuiHeightObserver)
+        landscapeGuiHeightObserver.disconnect();
       mobilePauseDockButton = null;
       window.removeEventListener('orientationchange', updateHandleOrientation);
       window.removeEventListener('resize', updateHandleOrientation);

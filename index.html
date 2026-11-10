@@ -1266,7 +1266,9 @@
             }
 
             .dg.ac .dg.main[data-mobile-ui-state="full"] {
-                height: 100vh !important;
+                height: var(--mobile-gui-landscape-height, auto) !important;
+                margin-bottom: auto;
+                margin-top: auto;
                 max-height: 100vh;
                 width: min(82vw, 420px) !important;
             }
@@ -1399,10 +1401,22 @@
             }
 
             @supports (height: 100dvh) {
-                .dg.ac .dg.main,
-                .dg.ac .dg.main[data-mobile-ui-state="full"],
                 .dg.ac .dg.main[data-mobile-ui-state="none"] {
                     height: 100dvh !important;
+                    max-height: 100dvh;
+                }
+
+                .dg.ac .dg.main[data-mobile-ui-state="full"] {
+                    max-height: 100dvh;
+                }
+            }
+
+            .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
+                max-height: 100vh;
+            }
+
+            @supports (height: 100dvh) {
+                .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
                     max-height: 100dvh;
                 }
             }
