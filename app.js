@@ -11,7 +11,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>.
 
 const isMobileUserAgent = navigator.userAgentData?.mobile === true ||
   /Android|iPhone|iPad|iPod|Mobile|Windows Phone|IEMobile|BlackBerry|Opera Mini/i.test(navigator.userAgent) ||
-  (navigator.platform == 'MacIntel' && navigator.maxTouchPoints > 1);
+  (navigator.platform == 'MacIntel' && navigator.maxTouchPoints > 1) ||
+  (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) <= 900 &&
+    Math.max(screen.width, screen.height) <= 1366);
 
 if (isMobileUserAgent)
   document.documentElement.classList.add('mobile-user-agent');
@@ -19,7 +21,9 @@ if (isMobileUserAgent)
 function isMobileAdaptedViewport()
 {
   return window.matchMedia(
-    '(max-width: 600px), (max-width: 1024px) and (max-height: 600px) and (orientation: landscape)'
+    '(max-width: 600px), (max-device-width: 900px), ' +
+    '(max-width: 1024px) and (max-height: 600px) and (orientation: landscape), ' +
+    '(max-device-height: 820px) and (orientation: landscape)'
   ).matches;
 }
 
@@ -5336,8 +5340,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
   function setupMobileGuiHandle(gui, toolController)
   {
-    const landscapeQuery = window.matchMedia('(max-width: 1024px) and (max-height: 600px) and (orientation: landscape)');
-    if (!isMobileUserAgent || (!window.matchMedia('(max-width: 600px)').matches && !landscapeQuery.matches))
+    const landscapeQuery = window.matchMedia(
+      '(max-width: 1024px) and (max-height: 600px) and (orientation: landscape), ' +
+      '(max-device-height: 820px) and (orientation: landscape)'
+    );
+    const portraitQuery = window.matchMedia('(max-width: 600px), (max-device-width: 900px)');
+    if (!isMobileUserAgent || (!portraitQuery.matches && !landscapeQuery.matches))
       return null;
 
     const main = gui.domElement;
