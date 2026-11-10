@@ -156,6 +156,82 @@ const weather = await response.json();
 console.log(weather.simulationTime, weather.stations[0]?.airTemperatureC);
 ```
 
+## Automatically sharing saves between devices
+
+The GitHub Pages app can automatically make a loaded save available to devices on the same public IP address. Save files are stored on your own always-on Proxmox machine; a Cloudflare Worker provides the HTTPS front door and IP-based discovery. This setup does not use Cloudflare R2 or `lan_weather_server.py`.
+
+### Set up the Proxmox relay
+
+1. Create a small Debian VM on Proxmox. Installing Docker inside a VM is preferable to installing it on the Proxmox host.
+2. Install Docker Engine with the Compose plugin and Tailscale on the VM. Sign in to Tailscale, enable HTTPS for your tailnet, and enable Funnel in your Tailscale policy. Funnel is available on Tailscale plans without a custom domain and does not require router port forwarding.
+3. Copy the `relay-server` folder from this repository to your VM. From PowerShell in the project root, for example:
+
+   ```powershell
+   scp -r .\relay-server <linux-user>@<debian-vm-ip>:weather-save-relay
+   ```
+
+4. Generate a random secret on your computer with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Save it somewhere temporarily; use it for the VM's `RELAY_SECRET` and the Worker secret. Do not publish it.
+5. On the VM, create `~/weather-save-relay/.env` with this line, replacing the placeholder with the generated secret:
+
+   ```text
+   RELAY_SECRET=replace-with-your-64-character-secret
+   ```
+
+6. On the VM, start the storage service:
+
+   ```sh
+   cd ~/weather-save-relay
+   docker compose up -d --build
+   ```
+
+   Its save data is kept in a persistent Docker volume. The service listens only on the VM's loopback interface.
+7. Expose that local service with Tailscale Funnel:
+
+   ```sh
+   sudo tailscale funnel --bg --https=443 http://127.0.0.1:8787
+   sudo tailscale funnel status
+   ```
+
+   Use the HTTPS URL shown by the status command (for example, `https://your-vm.your-tailnet.ts.net`) as the relay origin below. Tailscale may ask you to enable Funnel/HTTPS or adjust your tailnet policy first.
+
+### Configure the Cloudflare Worker front door
+
+1. From the project root, set the Worker secrets. Use the same `RELAY_SECRET` value as the VM's `.env`; enter the VM's Tailscale Funnel HTTPS URL (for example, `https://your-vm.your-tailnet.ts.net`) for `RELAY_ORIGIN`:
+
+   ```powershell
+   npx wrangler secret put RELAY_SECRET --config worker/wrangler.jsonc
+   npx wrangler secret put RELAY_ORIGIN --config worker/wrangler.jsonc
+   ```
+
+   Paste each value when Wrangler prompts. These values are deployment secrets and must not be committed. This Worker does not bind to R2.
+2. Deploy the Worker:
+
+   ```powershell
+   npm run relay:deploy
+   ```
+
+   Wrangler prints its `workers.dev` URL. Put that URL in `save-relay-config.js` as `window.WEATHER_SAVE_RELAY_URL = 'https://your-worker.your-subdomain.workers.dev';`, then deploy the updated site to GitHub Pages.
+
+After setup, loading a save on the PC asks whether you want to share that save. If you agree, it uploads through the Worker to your Proxmox machine and displays a random access code. A phone using the app on the same Wi-Fi (or the same VPN egress) discovers the **Load save from …** pill; selecting it requires entering that code. Keep the code private and share it only with devices you trust. Heartbeats and deleting a share require a separate owner key held only in the PC tab. Shares expire ten minutes after their last heartbeat and are removed from Proxmox storage automatically.
+
+Save files pass through Cloudflare's Worker but are not stored there; the Proxmox relay stores and serves them. Discovery is grouped by public IP, not by home network or account, so other people sharing that public IP can see active share filenames and device labels. They cannot download a save without its random access code. The Worker limits each public IP to 120 requests per minute and three uploads per minute (Cloudflare's limits are approximate); the relay also caps uploads at 90 MiB each, active data at 180 MiB per public IP, total stored save data at 1 GiB by default, active shares at ten per public IP, and network metadata to 10,000 active IP groups. Configure `RELAY_MAX_STORAGE_BYTES` in the VM's `.env` to change the disk quota. Do not load sensitive saves while sharing a public IP with untrusted users. Browsers do not reveal a computer's actual hostname to websites, so the pill uses a platform label such as “Windows PC” instead of a custom PC name. Cloudflare Workers and Tailscale Funnel have service limits that may change; review their current plan limits before relying on them.
+
+The Worker Origin allowlist and CORS are browser protections, not authentication. Save download authorization uses the per-share code; owner actions use a different random key; Worker-to-Proxmox proxy requests use `RELAY_SECRET`. The relay binds only to VM loopback and should only be exposed through the Worker/Tailscale Funnel. Keep both secrets out of public repositories and logs.
+
+To update the relay after changing `relay-server` files, copy the folder to the VM again and rebuild it:
+
+```powershell
+scp -r .\relay-server <linux-user>@<debian-vm-ip>:weather-save-relay-update
+```
+
+Then on the VM run:
+
+```sh
+cp -a ~/weather-save-relay-update/. ~/weather-save-relay/
+cd ~/weather-save-relay
+sudo docker compose up -d --build
+```
+
 ## Plant ecosystem
 Land surfaces support a lightweight plant community that responds to local near-surface temperature, wind, atmospheric relative humidity, soil moisture, snow cover, latitude, and elevation. Air humidity and soil moisture both affect biome classification, species establishment, reproduction, and drought stress. Hovering over a plant shows its health, wind damage and force, local air humidity, soil moisture, and temperature. The desert catalog includes specialized ultra-arid species such as welwitschia and resurrection plants. Plants are rooted at the terrain surface, flex under a damped wind-force model, and accumulate stress and structural damage when winds exceed species resistance; grasses, flowers, mosses, and shrubs can form visible clumps. Plants in dry biomes use muted, drought-adapted colors. Suitable bare ground can germinate from a dormant seed bank even without nearby parent plants. Plants grow when conditions are suitable, reproduce into nearby open ground, become stressed when conditions deteriorate, and eventually die if they cannot recover. The Ecosystem controls can pause plant growth or hide the plant layer.
 

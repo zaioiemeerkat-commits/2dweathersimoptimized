@@ -547,6 +547,7 @@ document.addEventListener('DOMContentLoaded', () => {
   createPresetSelect();
   stationSelector = createStationSelect();
   prepareSounding();
+  setupLanSharedSaveMenu();
 });
 
 
@@ -2213,25 +2214,267 @@ class Weatherstation
 let weatherStations = []; // array holding all weather stations
 let loadDataInProgress = false;
 
-async function loadData()
+function setupLanSharedSaveMenu()
+{
+  const container = document.getElementById('lanSharedSaveButtons');
+  const relayUrl = window.WEATHER_SAVE_RELAY_URL?.replace(/\/+$/, '');
+  if (!container || !relayUrl || !window.matchMedia('(max-width: 700px)').matches)
+    return;
+
+  let shares = [];
+  let discoveryInProgress = false;
+  const buttonsById = new Map();
+
+  async function refreshSharedSaves()
+  {
+    if (discoveryInProgress || !document.getElementById('IntroScreen')?.isConnected ||
+        document.visibilityState != 'visible')
+      return;
+
+    discoveryInProgress = true;
+    try {
+      const response = await fetch(`${relayUrl}/api/discovery`, {cache: 'no-store'});
+      if (!response.ok)
+        throw new Error(`Save discovery failed with HTTP ${response.status}.`);
+      const result = await response.json();
+      shares = Array.isArray(result.shares) ? result.shares.filter(share =>
+        typeof share.id == 'string' && typeof share.filename == 'string' &&
+        typeof share.device == 'string'
+      ) : [];
+      renderSharedSaves();
+    } finally {
+      discoveryInProgress = false;
+    }
+  }
+
+  function renderSharedSaves()
+  {
+    const activeIds = new Set(shares.map(share => share.id));
+    for (const [id, button] of buttonsById) {
+      if (!activeIds.has(id)) {
+        button.remove();
+        buttonsById.delete(id);
+      }
+    }
+
+    shares.forEach(function(share) {
+      let button = buttonsById.get(share.id);
+      if (!button) {
+        button = document.createElement('button');
+        button.className = 'main-menu-share-save';
+        button.type = 'button';
+        button.dataset.shareId = share.id;
+        button.addEventListener('click', () => loadSharedSave(button));
+        buttonsById.set(share.id, button);
+        container.appendChild(button);
+      }
+      button.textContent = `Load save from ${share.device}`;
+      button.setAttribute('aria-label', `Load ${share.filename} from ${share.device}`);
+      button.title = `${share.filename} — shared with devices on this public IP`;
+    });
+  }
+
+  async function loadSharedSave(button)
+  {
+    if (button.disabled)
+      return;
+    const readKey = window.prompt('Enter the save access code shown on the computer sharing this save.');
+    if (!readKey)
+      return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`${relayUrl}/api/shares/${encodeURIComponent(button.dataset.shareId)}`,
+        {cache: 'no-store', headers: {'X-Share-Read-Key': readKey.trim()}});
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || `Shared save download failed with HTTP ${response.status}.`);
+      }
+      const share = shares.find(item => item.id == button.dataset.shareId);
+      if (!share)
+        throw new Error('This save is no longer available on your network.');
+      const saveFile = new File([await response.blob()], share.filename, {type: 'application/x-binary'});
+      await loadData(saveFile);
+    } catch (error) {
+      console.error('Could not load the save shared on this network.', error);
+      alert('Could not load the shared save: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      button.disabled = false;
+      void refreshSharedSaves();
+    }
+  }
+
+  void refreshSharedSaves().catch(error =>
+    console.warn('Save relay discovery failed; check the configured relay URL.', error));
+  window.setInterval(() => void refreshSharedSaves().catch(error =>
+    console.warn('Save relay discovery failed.', error)), 10000);
+}
+
+function getSaveRelayDeviceLabel()
+{
+  const platform = navigator.userAgentData?.platform || navigator.platform;
+  if (/android/i.test(platform))
+    return 'Android phone';
+  if (/iphone|ipad|ipod/i.test(platform))
+    return 'iPhone or iPad';
+  if (/mac/i.test(platform))
+    return 'Mac';
+  if (/win/i.test(platform))
+    return 'Windows PC';
+  if (/linux/i.test(platform))
+    return 'Linux PC';
+  return 'Computer';
+}
+
+let saveRelayNoticeTimer;
+
+function showSaveRelayNotice()
+{
+  let notice = document.querySelector('.save-relay-notice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.className = 'save-relay-notice';
+    notice.setAttribute('role', 'status');
+    notice.setAttribute('aria-live', 'polite');
+    document.body.appendChild(notice);
+  }
+
+  clearTimeout(saveRelayNoticeTimer);
+  notice.textContent =
+    'Discoverable to devices on this public IP for 10 minutes after the last heartbeat. The save is stored on the Proxmox relay and removed when sharing stops or expires.';
+  notice.classList.add('is-visible');
+  saveRelayNoticeTimer = window.setTimeout(() => notice.classList.remove('is-visible'), 7000);
+}
+
+function createSaveRelayKey()
+{
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+let activeLanSharedSaveId = null;
+let activeLanSharedSaveOwnerKey = null;
+let lanSharedSaveHeartbeat;
+
+async function stopLanSharedSave()
+{
+  const shareId = activeLanSharedSaveId;
+  const ownerKey = activeLanSharedSaveOwnerKey;
+  activeLanSharedSaveId = null;
+  activeLanSharedSaveOwnerKey = null;
+  window.clearInterval(lanSharedSaveHeartbeat);
+  lanSharedSaveHeartbeat = null;
+  if (!shareId || !ownerKey)
+    return;
+
+  const relayUrl = window.WEATHER_SAVE_RELAY_URL?.replace(/\/+$/, '');
+  if (!relayUrl)
+    return;
+  try {
+    await fetch(`${relayUrl}/api/shares/${encodeURIComponent(shareId)}`, {
+      method: 'DELETE',
+      headers: {'X-Share-Owner-Key': ownerKey}
+    });
+  } catch (error) {
+    console.warn('Could not stop sharing the previous save; it will expire automatically.', error);
+  }
+}
+
+async function publishLanSharedSave(file)
+{
+  const relayUrl = window.WEATHER_SAVE_RELAY_URL?.replace(/\/+$/, '');
+  if (!relayUrl)
+    return;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30000);
+  try {
+    await stopLanSharedSave();
+    if (!window.confirm(
+      'Share this save with other devices on your public IP? Anyone who also has the access code can download it. ' +
+      'The code will be shown after upload; only share it with devices you trust.'
+    ))
+      return;
+
+    const readKey = createSaveRelayKey();
+    const ownerKey = createSaveRelayKey();
+    const url = `${relayUrl}/api/shares?name=${encodeURIComponent(file.name)}&device=${encodeURIComponent(getSaveRelayDeviceLabel())}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-Upload-Length': String(file.size),
+        'X-Share-Read-Key': readKey,
+        'X-Share-Owner-Key': ownerKey
+      },
+      body: file,
+      signal: controller.signal
+    });
+    const responseText = await response.text();
+    let result;
+    if (responseText) {
+      try {
+        result = JSON.parse(responseText);
+      } catch {
+        if (response.ok)
+          throw new Error('Save relay returned invalid JSON.');
+      }
+    }
+    if (!response.ok)
+      throw new Error(result?.error || `Save relay upload failed with HTTP ${response.status}.`);
+    if (typeof result?.id != 'string')
+      throw new Error('Save relay did not return a valid share ID.');
+    activeLanSharedSaveId = result.id;
+    activeLanSharedSaveOwnerKey = ownerKey;
+    const enteredKey = window.prompt(
+      'Save shared. Copy this access code and enter it on the device that should load the save:',
+      readKey
+    );
+    if (enteredKey === null) {
+      await stopLanSharedSave();
+      return;
+    }
+    showSaveRelayNotice();
+    lanSharedSaveHeartbeat = window.setInterval(async () => {
+      if (activeLanSharedSaveId != result.id)
+        return;
+      try {
+        const heartbeat = await fetch(`${relayUrl}/api/shares/${encodeURIComponent(result.id)}/heartbeat`,
+          {method: 'POST', headers: {'X-Share-Owner-Key': ownerKey}});
+        if (!heartbeat.ok)
+          throw new Error(`Save relay heartbeat failed with HTTP ${heartbeat.status}.`);
+      } catch (error) {
+        console.warn('Could not renew the shared save; it will expire automatically.', error);
+        window.clearInterval(lanSharedSaveHeartbeat);
+        lanSharedSaveHeartbeat = null;
+      }
+    }, 2 * 60 * 1000);
+  } catch (error) {
+    console.warn('Could not share this save. Check the save relay setup.', error);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function loadData(fileOverride = null)
 {
   if (loadDataInProgress)
     return;
 
   loadDataInProgress = true;
   try {
-    await loadDataInternal();
+    await loadDataInternal(fileOverride);
   } finally {
     loadDataInProgress = false;
   }
 }
 
-async function loadDataInternal()
+async function loadDataInternal(fileOverride)
 {
   const fileInput = document.getElementById('fileInput');
-  const file = fileInput.files[0];
+  const file = fileOverride || fileInput.files[0];
 
   if (!file) {
+    void stopLanSharedSave();
     sim_res_x = Number.parseInt(document.getElementById('simResSelX').value, 10);
     sim_res_y = Number.parseInt(document.getElementById('simResSelY').value, 10);
     sim_height = Number.parseInt(document.getElementById('simHeightSel').value, 10);
@@ -2345,6 +2588,7 @@ async function loadDataInternal()
       alert('Save File from older version, settings will not be loaded');
 
     await mainScript(baseTexture, waterTexture, wallTexture, precipitation);
+    void publishLanSharedSave(file);
   } catch (error) {
     console.error('The simulation save could not be loaded.', error);
     loadingBar?.remove();
@@ -2716,8 +2960,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       currentPerformanceScoreIcon.dataset.level = performanceLevel;
       const mouth = currentPerformanceScoreIcon.querySelector('[data-face-mouth]');
       mouth.setAttribute('d', performanceLevel == 'good'
-        ? 'M8 13c1.1 1.3 2.4 2 4 2s2.9-.7 4-2'
-        : performanceLevel == 'warn' ? 'M8 14h8' : 'M8 16c1.1-1.3 2.4-2 4-2s2.9.7 4 2');
+        ? 'M15.182 15.182a4.5 4.5 0 0 1-6.364 0'
+        : performanceLevel == 'warn' ? 'M9 15h6' : 'M8.818 15.182a4.5 4.5 0 0 0 6.364 0');
       currentPerformanceScoreIcon.setAttribute('aria-label', performanceLabel + ' performance');
     }
 
@@ -4813,7 +5057,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   ecosystemCanvas.style.top = '0';
   ecosystemCanvas.style.width = '100vw';
   ecosystemCanvas.style.height = '100vh';
-  ecosystemCanvas.style.zIndex = '0';
+  ecosystemCanvas.style.zIndex = '1';
   ecosystemCanvas.style.pointerEvents = 'none';
   ecosystemCanvas.style.display = 'none';
   document.body.appendChild(ecosystemCanvas);
@@ -4836,6 +5080,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   let ecosystemLastPhysicsTime = 0;
   let ecosystemHoursAccumulator = 0;
   let ecosystemSampleCursor = 0;
+  let ecosystemSurfaceSampleCursor = 0;
+  let ecosystemLastSurfaceRefreshTime = 0;
 
   canvas = document.getElementById('mainCanvas');
 
@@ -4987,8 +5233,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     mobilePauseDockButton.dataset.hint = paused ? 'Resume simulation' : 'Pause simulation';
     mobilePauseDockButton.setAttribute('aria-pressed', paused ? 'true' : 'false');
     mobilePauseDockButton.innerHTML = paused ?
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 5 12 7-12 7V5Z"/></svg>' :
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14"/><path d="M16 5v14"/></svg>';
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon"><path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z"/></svg>' :
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon"><path d="M15.75 5.25v13.5m-7.5-13.5v13.5"/></svg>';
   }
 
   function setupMobileGuiHandle(gui, toolController)
@@ -5094,31 +5340,31 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       button.addEventListener('contextmenu', event => event.preventDefault());
     }
 
-    function lucideIcon(paths)
+    function heroicon(paths)
     {
-      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon">${paths}</svg>`;
     }
 
     const toolIcons = {
-      TOOL_CAMERA : lucideIcon('<path d="m5 9-3 3 3 3"/><path d="M9 5l3-3 3 3"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>'),
-      TOOL_NONE : lucideIcon('<path d="M15 4 9 10"/><path d="M11 6 6 11l-3 8 2 2 8-3 5-5"/><path d="m14 3 7 7"/>'),
-      TOOL_TEMPERATURE : lucideIcon('<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0Z"/><path d="M12 11v6"/>'),
-      TOOL_WATER : lucideIcon('<path d="M20 16.2A4.5 4.5 0 0 0 18 7.5a6 6 0 0 0-11.6 1.8A4 4 0 0 0 6 17h12"/><path d="M12 21s-3-2.7-3-5a3 3 0 0 1 6 0c0 2.3-3 5-3 5Z"/>'),
-      TOOL_UPDRAFT : lucideIcon('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/><path d="M5 19h14"/>'),
-      TOOL_DOWNDRAFT : lucideIcon('<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/><path d="M5 5h14"/>'),
-      TOOL_WALL_LAND : lucideIcon('<path d="m3 18 6-10 4 6 3-4 5 8H3Z"/><path d="M3 21h18"/>'),
-      TOOL_WALL_SEA : lucideIcon('<path d="M3 12c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 3-2"/><path d="M3 17c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2 2-2 3-2"/>'),
-      TOOL_WALL_URBAN : lucideIcon('<path d="M3 21V8l6 3V5l6 3V3h6v18H3Z"/><path d="M7 15h1"/><path d="M12 14h1"/><path d="M17 12h1"/><path d="M17 16h1"/>'),
-      TOOL_WALL_RUNWAY : lucideIcon('<path d="M3 21 21 3"/><path d="m8 16 2 2"/><path d="m12 12 2 2"/><path d="m16 8 2 2"/><path d="m4 8 12 4-4 4L4 8Z"/>'),
-      TOOL_WALL_INDUSTRIAL : lucideIcon('<path d="M3 21V9l6 4V9l6 4V5h6v16H3Z"/><path d="M15 5V2h3v3"/><path d="M7 17h1"/><path d="M12 17h1"/><path d="M17 17h1"/>'),
-      TOOL_WALL_FIRE : lucideIcon('<path d="M12 22a7 7 0 0 0 7-7c0-3-2-5-4-7 0 3-2 4-2 4 0-5-3-8-5-10 0 5-1 7-3 10a7 7 0 0 0 7 10Z"/><path d="M12 22a3 3 0 0 0 3-3c0-1.3-1-2.5-2-3-1 1-4 2-4 4a3 3 0 0 0 3 2Z"/>'),
-      TOOL_SMOKE : lucideIcon('<path d="M8 16h9a4 4 0 1 0-1-7.9A5 5 0 0 0 6.4 9 3.5 3.5 0 0 0 8 16Z"/><path d="M8 20h8"/><path d="M11 4c0 1-1 1-1 2"/><path d="M16 3c0 1-1 1-1 2"/>'),
-      TOOL_WALL_MOIST : lucideIcon('<path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><path d="M9 11c0-1.7 1.3-3 3-3"/><path d="M8 16h8"/>'),
-      TOOL_VEGETATION : lucideIcon('<path d="M11 20A7 7 0 0 1 4 13c0-4 4-7 14-9 0 10-3 16-7 16Z"/><path d="M8 16c2-2 4-4 8-6"/><path d="M12 20v2"/>'),
-      TOOL_WALL_SNOW : lucideIcon('<path d="M12 2v20"/><path d="m4.9 6 14.2 12"/><path d="m19.1 6-14.2 12"/><path d="m8 4 4 2 4-2"/><path d="m8 20 4-2 4 2"/>'),
-      TOOL_WIND : lucideIcon('<path d="M3 8h12a3 3 0 1 0-3-3"/><path d="M2 12h17a3 3 0 1 1-3 3"/><path d="M4 16h6"/>'),
-      TOOL_WIND_PUSH : lucideIcon('<path d="M3 7h11"/><path d="m11 4 3 3-3 3"/><path d="M3 12h16"/><path d="m16 9 3 3-3 3"/><path d="M3 17h11"/>'),
-      TOOL_STATION : lucideIcon('<path d="M12 22s7-5.2 7-12a7 7 0 1 0-14 0c0 6.8 7 12 7 12Z"/><circle cx="12" cy="10" r="2.5"/><path d="M12 7.5v5M9.5 10h5"/>')
+      TOOL_CAMERA : heroicon('<path d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/>'),
+      TOOL_NONE : heroicon('<path d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125"/>'),
+      TOOL_TEMPERATURE : heroicon('<path d="M14.25 14.76V5.25a2.25 2.25 0 0 0-4.5 0v9.51a4.5 4.5 0 1 0 4.5 0Z"/><path d="M12 12v5.25"/>'),
+      TOOL_WATER : heroicon('<path d="M2.25 12.75a4.5 4.5 0 0 1 4.5-4.5c.36 0 .71.043 1.044.123a5.25 5.25 0 0 1 10.232 1.002 3.75 3.75 0 0 1 .474 7.47H7.5a5.25 5.25 0 0 1-5.25-4.095Z"/><path d="M12 21s-2.25-2.25-2.25-4.125a2.25 2.25 0 1 1 4.5 0C14.25 18.75 12 21 12 21Z"/>'),
+      TOOL_UPDRAFT : heroicon('<path d="M12 19.5V4.5m0 0-6 6m6-6 6 6"/><path d="M4.5 19.5h15"/>'),
+      TOOL_DOWNDRAFT : heroicon('<path d="M12 4.5v15m0 0 6-6m-6 6-6-6"/><path d="M4.5 4.5h15"/>'),
+      TOOL_WALL_LAND : heroicon('<path d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z"/>'),
+      TOOL_WALL_SEA : heroicon('<path d="M2.25 12.75a4.5 4.5 0 0 1 4.5-4.5c.36 0 .71.043 1.044.123a5.25 5.25 0 0 1 10.232 1.002 3.75 3.75 0 0 1 .474 7.47H7.5a5.25 5.25 0 0 1-5.25-4.095Z"/>'),
+      TOOL_WALL_URBAN : heroicon('<path d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Zm0 3h.008v.008h-.008v-.008Z"/>'),
+      TOOL_WALL_RUNWAY : heroicon('<path d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5"/>'),
+      TOOL_WALL_INDUSTRIAL : heroicon('<path d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/>'),
+      TOOL_WALL_FIRE : heroicon('<path d="M15.362 5.214A8.252 8.252 0 0 1 12 21 8.25 8.25 0 0 1 6.038 7.047 8.287 8.287 0 0 0 9 9.601a8.983 8.983 0 0 1 3.361-6.867 8.21 8.21 0 0 0 3 2.48Z"/><path d="M12 18a3.75 3.75 0 0 0 .495-7.468 5.99 5.99 0 0 0-1.925 3.547 5.975 5.975 0 0 1-2.133-1.001A3.75 3.75 0 0 0 12 18Z"/>'),
+      TOOL_SMOKE : heroicon('<path d="M2.25 15a4.5 4.5 0 0 0 4.5 4.5H18a3.75 3.75 0 0 0 1.332-7.257 3 3 0 0 0-3.758-3.848 5.25 5.25 0 0 0-10.233 2.33A4.502 4.502 0 0 0 2.25 15Z"/>'),
+      TOOL_WALL_MOIST : heroicon('<path d="M9.75 3.104v5.714a2.25 2.25 0 0 1-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 0 1 4.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0 1 12 15a9.065 9.065 0 0 0-6.23-.693L5 14.5m14.8.8 1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0 1 12 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/>'),
+      TOOL_VEGETATION : heroicon('<path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/>'),
+      TOOL_WALL_SNOW : heroicon('<path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z"/>'),
+      TOOL_WIND : heroicon('<path d="M3 8.25h12a3 3 0 1 0-3-3m-9 6h16.5a3 3 0 1 1-3 3m-13.5 3h7.5"/>'),
+      TOOL_WIND_PUSH : heroicon('<path d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3"/>'),
+      TOOL_STATION : heroicon('<path d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/>')
     };
     const quickToolButtons = new Map();
 
@@ -5287,6 +5533,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       const states = getStates(landscape);
       if (!states.includes(nextState) || main.dataset.mobileUiState == nextState)
         return;
+
+      if (!landscape && nextState == 'full') {
+        const contentHeight = handle.offsetHeight + controlsList.scrollHeight + 2;
+        const fullHeight = Math.min(getStateExtent('full', false), contentHeight);
+        main.style.setProperty('--mobile-gui-full-height', fullHeight + 'px');
+      }
 
       main.dataset.mobileUiState = nextState;
       hideQuickHint();
@@ -6332,9 +6584,9 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       if (key == 'overall') {
         const labelElement = controller.domElement.closest('li').querySelector('.property-name');
         labelElement.insertAdjacentHTML('beforeend',
-          ' <svg class="performance-score-face" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-label="Performance score">' +
-          '<circle cx="12" cy="12" r="9"/><circle cx="9" cy="10" r=".7" fill="currentColor"/><circle cx="15" cy="10" r=".7" fill="currentColor"/>' +
-          '<path data-face-mouth d="M8 13c1.1 1.3 2.4 2 4 2s2.9-.7 4-2"/></svg>');
+          ' <svg class="performance-score-face" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-label="Performance score" data-slot="icon">' +
+          '<path d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0ZM9.75 9.75c0 .414-.168.75-.375.75S9 10.164 9 9.75 9.168 9 9.375 9s.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Zm5.625 0c0 .414-.168.75-.375.75s-.375-.336-.375-.75.168-.75.375-.75.375.336.375.75Zm-.375 0h.008v.015h-.008V9.75Z"/>' +
+          '<path data-face-mouth d="M15.182 15.182a4.5 4.5 0 0 1-6.364 0"/></svg>');
         currentPerformanceScoreIcon = labelElement.querySelector('.performance-score-face');
       }
     }
@@ -6466,7 +6718,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       hapticsInfo.setAttribute('aria-label', 'Haptics information');
       hapticsInfo.setAttribute('aria-expanded', 'false');
       hapticsInfo.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon"><path d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z"/></svg>';
       hapticsLabel.appendChild(hapticsInfo);
 
       const hapticsTooltip = document.createElement('div');
@@ -6523,19 +6775,20 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     datGui.add(guiControls, 'download').name('Save Simulation to File');
     datGui.domElement.querySelectorAll('.cr.boolean .c input[type="checkbox"]').forEach(function(checkbox) {
       const icon = document.createElement('span');
-      icon.className = 'gui-lucide-check';
+      icon.className = 'gui-heroicon-check';
       icon.setAttribute('aria-hidden', 'true');
 
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 24 24');
       svg.setAttribute('fill', 'none');
       svg.setAttribute('stroke', 'currentColor');
-      svg.setAttribute('stroke-width', '2.5');
+      svg.setAttribute('stroke-width', '1.5');
       svg.setAttribute('stroke-linecap', 'round');
       svg.setAttribute('stroke-linejoin', 'round');
       svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('data-slot', 'icon');
       const checkPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      checkPath.setAttribute('d', 'm20 6-11 11-5-5');
+      checkPath.setAttribute('d', 'm4.5 12.75 6 6 9-13.5');
       svg.appendChild(checkPath);
       icon.appendChild(svg);
       checkbox.insertAdjacentElement('afterend', icon);
@@ -6590,11 +6843,11 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         </div>
         <div class="simulation-clock-detail">
           <span class="simulation-clock-event-icon">
-            <svg data-solar-icon="sunrise" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
-              <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4-4-4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+            <svg data-solar-icon="sunrise" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon" hidden>
+              <path d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
             </svg>
-            <svg data-solar-icon="sunset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M12 10V2"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m16 6-4 4-4-4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+            <svg data-solar-icon="sunset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon">
+              <path d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z"/>
             </svg>
           </span>
           <span class="simulation-clock-solar-event"></span>
@@ -6809,6 +7062,8 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     ecosystemLastIteration = iterNum;
     ecosystemHoursAccumulator = 0;
     ecosystemSampleCursor = 0;
+    ecosystemSurfaceSampleCursor = 0;
+    ecosystemLastSurfaceRefreshTime = 0;
   }
 
   var soundingGraph = {
@@ -9736,6 +9991,19 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         if (guiControls.plantGrowth)
           ecosystemStatus.population = plantEcosystem.getStatus();
       }
+    }
+
+    const surfaceRefreshTime = performance.now();
+    if (surfaceRefreshTime - ecosystemLastSurfaceRefreshTime >= 250) {
+      ecosystemLastSurfaceRefreshTime = surfaceRefreshTime;
+      const sites = plantEcosystem.sites;
+      const sampleCount = Math.min(120, sites.length);
+      const environments = samplePlantEnvironment(sites, ecosystemSurfaceSampleCursor, sampleCount);
+      plantEcosystem.updateWind(environments);
+      ecosystemSurfaceSampleCursor = sites.length ?
+        (ecosystemSurfaceSampleCursor + sampleCount) % sites.length : 0;
+      if (!guiControls.plantGrowth)
+        ecosystemStatus.population = plantEcosystem.getStatus();
     }
 
     const physicsTime = performance.now();

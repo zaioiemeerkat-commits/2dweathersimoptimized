@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "relay:dev": "wrangler dev --config worker/wrangler.jsonc",
+    "relay:deploy": "wrangler deploy --config worker/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "wrangler": "^4.159.0"
+  }
+}

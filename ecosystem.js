@@ -238,8 +238,21 @@ class PlantEcosystem
   {
     for (const environment of environments) {
       const site = this.sites[environment.siteIndex];
-      if (site)
-        site.wind += ((environment.wind || 0) - site.wind) * 0.6;
+      if (!site)
+        continue;
+      if (environment.wallType == 3) {
+        site.plant = null;
+        site.active = true;
+        continue;
+      }
+      if (environment.wallType != 1) {
+        site.plant = null;
+        site.active = false;
+        continue;
+      }
+
+      site.active = true;
+      site.wind += ((environment.wind || 0) - site.wind) * 0.6;
     }
   }
 
@@ -263,15 +276,13 @@ class PlantEcosystem
       const exposedArea = leafArea * (plant.clumpSize > 1 ? 0.72 : 1);
       const wind = Number.isFinite(site.wind) ? this.clamp(site.wind, -100, 100) : 0;
       const dragForce = 0.5 * 1.225 * 0.8 * exposedArea * wind * Math.abs(wind);
-      const mass = Math.max(0.25, Math.pow(height, 1.5) * (visual == 'grass' || visual == 'flower' ? 2 : 8));
-      const inertia = Math.max(0.02, mass * height * height / 3);
       const naturalFrequency = visual == 'grass' || visual == 'flower' || visual == 'moss' ? 1.3 :
         visual == 'shrub' || visual == 'vine' || visual == 'fern' || visual == 'palm' ? 1.8 : 2.4;
       const leanAngle = Number.isFinite(plant.leanAngle) ? plant.leanAngle : 0;
       const angularVelocity = Number.isFinite(plant.angularVelocity) ? plant.angularVelocity : 0;
-      const angularAcceleration = Number.isFinite(mass) && Number.isFinite(inertia) ?
-        dragForce * height * 0.5 / inertia - naturalFrequency * naturalFrequency * leanAngle -
-          2 * 0.82 * naturalFrequency * angularVelocity : 0;
+      const targetLeanAngle = Math.atan(wind * this.getPlantFlexibility(visual) * 0.02);
+      const angularAcceleration = naturalFrequency * naturalFrequency * (targetLeanAngle - leanAngle) -
+        2 * 0.82 * naturalFrequency * angularVelocity;
       plant.angularVelocity = Number.isFinite(angularAcceleration) ?
         this.clamp(angularVelocity + angularAcceleration * dt, -2.5, 2.5) : 0;
       plant.leanAngle = this.clamp(leanAngle + plant.angularVelocity * dt, -1.05, 1.05);
@@ -329,7 +340,7 @@ class PlantEcosystem
       const width = height * sprite.width / sprite.height;
       const screenY = projectY(site.y + 0.5);
       const gust = Math.sin(timeSeconds * 2.1 + site.x * 0.17 + site.y * 0.11) *
-        Math.min(0.06, Math.abs(site.wind) * 0.0012);
+        Math.min(0.22, Math.sqrt(Math.abs(site.wind)) * 0.06);
       const bendDistance = Math.tan(plant.leanAngle + gust) * height;
       const clumpSize = plant.clumpSize || 1;
       context.globalAlpha = 0.35 + plant.health * 0.65;

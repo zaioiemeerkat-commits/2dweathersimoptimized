@@ -113,12 +113,13 @@ void main()
           net_heating = 0.0;
         }
       } else { // in air
+        float emitted = IR_emitted(realTemp);
 
         IR_up = texture(lightTex, texCoordX0Ym)[IR_UP];
 
         if (texture(wallTex, texCoordX0Yp)[DISTANCE] == 0) // wall above
         {
-          IR_down = IR_emitted(realTemp);                  // Ir emmited downwars from surface above
+          IR_down = emitted;                               // IR emitted downwards from surface above
           net_heating += (IR_up - IR_down) * lightHeatingConst;
         } else {
 
@@ -135,7 +136,7 @@ void main()
 
           float absorbedDown = IR_down * emissivity;
           float absorbedUp = IR_up * emissivity;
-          float emitted = IR_emitted(realTemp) * emissivity; // this amount is emitted both up and down
+          emitted *= emissivity; // this amount is emitted both up and down
 
           net_heating += (absorbedDown + absorbedUp - emitted * 2.0) * lightHeatingConst;
 

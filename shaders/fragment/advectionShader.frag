@@ -115,8 +115,9 @@ void main()
     base[VX] = bilerp(baseTex, fragCoord - velAtVx).x;
     base[VY] = bilerp(baseTex, fragCoord - velAtVy).y;
 
-    base[PRESSURE] = bilerpWall(baseTex, wallTex, fragCoord - velAtP)[PRESSURE];
-    base[TEMPERATURE] = bilerpWall(baseTex, wallTex, fragCoord - velAtP)[TEMPERATURE];
+    vec4 advectedBase = bilerpWall(baseTex, wallTex, fragCoord - velAtP);
+    base[PRESSURE] = advectedBase[PRESSURE];
+    base[TEMPERATURE] = advectedBase[TEMPERATURE];
 
     water.xyw = bilerpWall(waterTex, wallTex, fragCoord - velAtP).xyw; // centered
 

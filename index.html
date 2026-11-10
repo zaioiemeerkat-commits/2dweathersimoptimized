@@ -9,6 +9,7 @@
     <script type="text/javascript" src="libraries/pako.min.js"></script>
     <script type="text/javascript" src="libraries/chart.js"></script>
     <script type="text/javascript" src="libraries/chartjs-adapter-date-fns.js"></script>
+    <script type="text/javascript" src="save-relay-config.js"></script>
     <script type="text/javascript" src="ecosystem.js"></script>
     <script type="text/javascript" src="app.js"></script>
     <link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
@@ -643,7 +644,7 @@
         }
 
         .dg.ac .dg.main {
-            background: rgba(18, 25, 35, 0.82);
+            background: #000;
             border: 1px solid rgba(255, 255, 255, 0.22);
             border-radius: 12px;
             box-sizing: border-box;
@@ -694,9 +695,17 @@
             z-index: 1000;
         }
 
+        @media (max-width: 600px) and (orientation: portrait) {
+            .app-version {
+                bottom: auto;
+                left: 12px;
+                top: calc(env(safe-area-inset-top, 0px) + 62px);
+            }
+        }
+
         @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
             .dg.ac .dg.main {
-                background: rgba(18, 25, 35, 0.56);
+                background: rgba(0, 0, 0, 0.58);
                 -webkit-backdrop-filter: blur(16px) saturate(140%);
                 backdrop-filter: blur(16px) saturate(140%);
             }
@@ -707,7 +716,7 @@
             line-height: 32px;
             padding-left: 7px;
             padding-right: 7px;
-            background: rgba(18, 25, 35, 0.28);
+            background: rgba(0, 0, 0, 0.28);
             border-bottom-color: rgba(255, 255, 255, 0.1);
         }
 
@@ -742,7 +751,7 @@
             z-index: 1;
         }
 
-        .dg.ac .dg.main .cr.boolean .gui-lucide-check {
+        .dg.ac .dg.main .cr.boolean .gui-heroicon-check {
             display: none;
             height: 18px;
             pointer-events: none;
@@ -753,13 +762,13 @@
             width: 18px;
         }
 
-        .dg.ac .dg.main .cr.boolean .gui-lucide-check svg {
+        .dg.ac .dg.main .cr.boolean .gui-heroicon-check svg {
             display: block;
             height: 100%;
             width: 100%;
         }
 
-        .dg.ac .dg.main .cr.boolean .c input[type="checkbox"]:checked + .gui-lucide-check {
+        .dg.ac .dg.main .cr.boolean .c input[type="checkbox"]:checked + .gui-heroicon-check {
             display: block;
         }
 
@@ -769,7 +778,7 @@
         }
 
         .dg.ac .dg.main li.title {
-            background-color: rgba(8, 12, 18, 0.82);
+            background-color: rgba(0, 0, 0, 0.82);
             border-radius: 5px;
             padding-left: 24px;
             position: relative;
@@ -849,14 +858,14 @@
 
         .dg.ac .dg.main .c select:hover,
         .dg.ac .dg.main .c select:focus {
-            background: rgba(22, 32, 45, 0.98);
+            background: rgba(32, 32, 32, 0.98);
             border-color: rgba(255, 255, 255, 0.32);
             box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.16);
             outline: none;
         }
 
         .dg.ac .dg.main .c select option {
-            background: #121923;
+            background: #000;
             color: #fff;
         }
 
@@ -1016,8 +1025,8 @@
             }
 
             .dg.ac .dg.main {
-                bottom: 0;
-                border-radius: 12px 12px 0 0;
+                bottom: max(8px, env(safe-area-inset-bottom));
+                border-radius: 12px;
                 left: 0;
                 height: min(80vh, 680px) !important;
                 margin: 0;
@@ -1028,10 +1037,10 @@
                 top: auto;
                 width: 100vw !important;
                 animation: mobile-dat-gui-enter 320ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
-                background: rgba(18, 25, 35, 0.42) !important;
+                background: rgba(0, 0, 0, 0.58) !important;
                 -webkit-backdrop-filter: blur(20px) saturate(155%);
                 backdrop-filter: blur(20px) saturate(155%);
-                transition: height 280ms cubic-bezier(0.2, 0.75, 0.25, 1),
+                transition: height 460ms cubic-bezier(0.16, 1, 0.3, 1),
                     width 280ms cubic-bezier(0.2, 0.75, 0.25, 1);
             }
 
@@ -1050,7 +1059,7 @@
             }
 
             .dg.ac .dg.main[data-mobile-ui-state="full"] {
-                height: auto !important;
+                height: var(--mobile-gui-full-height, auto) !important;
                 max-height: min(80vh, 680px) !important;
             }
 
@@ -1096,7 +1105,7 @@
 
             .dg.ac .dg.main > .mobile-quick-dock {
                 align-items: center;
-                background: rgba(18, 25, 35, 0.18);
+                background: rgba(0, 0, 0, 0.18);
                 border-top: 1px solid rgba(255, 255, 255, 0.12);
                 border-radius: 0 0 12px 12px;
                 box-sizing: border-box;
@@ -1162,6 +1171,7 @@
                 }
 
                 .dg.ac .dg.main[data-mobile-ui-state="full"] {
+                    height: var(--mobile-gui-full-height, auto) !important;
                     max-height: min(80svh, 680px) !important;
                 }
             }
@@ -1956,6 +1966,82 @@
             justify-content: center;
         }
 
+        .main-menu-action-stack {
+            display: grid;
+            gap: 10px;
+            justify-items: center;
+        }
+
+        .main-menu-share-save {
+            align-items: center;
+            background: rgba(0, 0, 0, 0.48);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            border-radius: 999px;
+            box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.94);
+            cursor: pointer;
+            display: flex;
+            font: 500 13px/1.35 "Plus Jakarta Sans", sans-serif;
+            justify-content: center;
+            max-width: min(100%, 360px);
+            min-height: 38px;
+            padding: 8px 16px;
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            backdrop-filter: blur(18px) saturate(130%);
+            transition: none;
+        }
+
+        .main-menu-share-save:hover,
+        .main-menu-share-save:active {
+            background: rgba(0, 0, 0, 0.48);
+            color: rgba(255, 255, 255, 0.94);
+            transform: none;
+        }
+
+        .main-menu-share-save:focus-visible {
+            outline: 2px solid rgba(255, 255, 255, 0.8);
+            outline-offset: 3px;
+        }
+
+        .main-menu-share-save:disabled {
+            cursor: progress;
+            opacity: 0.65;
+        }
+
+        .main-menu-share-save[hidden] {
+            display: none;
+        }
+
+        .save-relay-notice {
+            background: rgba(0, 0, 0, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            color: #fff;
+            font: 500 13px/1.5 "Plus Jakarta Sans", sans-serif;
+            left: 50%;
+            max-width: min(520px, calc(100vw - 32px));
+            opacity: 0;
+            padding: 11px 16px;
+            pointer-events: none;
+            position: fixed;
+            text-align: center;
+            top: max(16px, env(safe-area-inset-top));
+            transform: translate(-50%, -8px);
+            transition: opacity 180ms ease, transform 180ms ease;
+            z-index: 100;
+            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            backdrop-filter: blur(18px) saturate(130%);
+        }
+
+        .save-relay-notice.is-visible {
+            opacity: 1;
+            transform: translate(-50%, 0);
+        }
+
+        .main-menu-shared-saves:empty {
+            display: none;
+        }
+
         .main-menu-file-input {
             display: none;
         }
@@ -2243,26 +2329,28 @@
                 <p class="main-menu-credit">Thanks to <a href="https://niels747.github.io/2D-Weather-Sandbox/" target="_blank" rel="noopener noreferrer">Niels Daemen</a> for the original simulation.</p>
                 <p class="main-menu-beta-notice">THIS IS A BETA. Do not expect 100% stability</p>
             </div>
-            <div class="main-menu-actions">
-                <div class="main-menu-action-wrap">
-                    <button class="main-menu-action" type="button" aria-label="Create a new simulation"
-                        onclick="showNewSimulationSetup()">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                            <path d="M12 5v14M5 12h14" />
-                        </svg>
-                    </button>
-                    <span class="main-menu-tooltip" role="tooltip">Create new simulation</span>
+            <div class="main-menu-action-stack">
+                <div class="main-menu-actions">
+                    <div class="main-menu-action-wrap">
+                        <button class="main-menu-action" type="button" aria-label="Create a new simulation"
+                            onclick="showNewSimulationSetup()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon">
+                                <path d="M12 4.5v15m7.5-7.5h-15" />
+                            </svg>
+                        </button>
+                        <span class="main-menu-tooltip" role="tooltip">Create new simulation</span>
+                    </div>
+                    <div class="main-menu-action-wrap">
+                        <button class="main-menu-action" type="button" aria-label="Load an existing simulation"
+                            onclick="document.getElementById('fileInput').click()">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon">
+                                <path d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                            </svg>
+                        </button>
+                        <span class="main-menu-tooltip" role="tooltip">Load existing save</span>
+                    </div>
                 </div>
-                <div class="main-menu-action-wrap">
-                    <button class="main-menu-action" type="button" aria-label="Load an existing simulation"
-                        onclick="document.getElementById('fileInput').click()">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                            <path d="M12 13V3m0 0 4 4m-4-4L8 7" />
-                            <path d="M5 13v5a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-5" />
-                        </svg>
-                    </button>
-                    <span class="main-menu-tooltip" role="tooltip">Load existing save</span>
-                </div>
+                <div class="main-menu-shared-saves" id="lanSharedSaveButtons" aria-live="polite"></div>
             </div>
             <input class="main-menu-file-input" type="file" id="fileInput" name="fileInput"
                 accept=".weathersandbox" onchange="loadData()" />
@@ -2340,8 +2428,8 @@
             </table>
             <button class="main-menu-submit" type="button" aria-label="Start simulation"
                 title="Start simulation" onclick="loadData ()">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path d="m8 5 12 7-12 7V5Z" />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-slot="icon">
+                    <path d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
                 </svg>
             </button>
             <i>Move the mouse until you see a terrain you like, then just click to start.</i>
