@@ -2314,13 +2314,13 @@ async function publishLanSharedSave(file)
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
-    await stopLanSharedSave();
     if (!window.confirm(
       'Share this save with other devices on your public IP? Anyone who also has the access code can download it. ' +
       'The code will be shown after upload; only share it with devices you trust.'
     ))
       return;
 
+    await stopLanSharedSave();
     const readKey = createSaveRelayKey();
     const ownerKey = createSaveRelayKey();
     const url = `${relayUrl}/api/shares?name=${encodeURIComponent(file.name)}&device=${encodeURIComponent(getSaveRelayDeviceLabel())}`;
@@ -2359,6 +2359,11 @@ async function publishLanSharedSave(file)
       await stopLanSharedSave();
       return;
     }
+    if (enteredKey.trim() != readKey) {
+      await stopLanSharedSave();
+      alert('The access code was changed, so the save is no longer being shared.');
+      return;
+    }
     showSaveRelayNotice();
     lanSharedSaveHeartbeat = window.setInterval(async () => {
       if (activeLanSharedSaveId != result.id)
@@ -2375,7 +2380,8 @@ async function publishLanSharedSave(file)
       }
     }, 2 * 60 * 1000);
   } catch (error) {
-    console.warn('Could not share this save. Check the save relay setup.', error);
+    console.error('Could not share this save. Check the save relay setup.', error);
+    alert('Could not share this save: ' + (error instanceof Error ? error.message : String(error)));
   } finally {
     window.clearTimeout(timeout);
   }
@@ -2514,7 +2520,6 @@ async function loadDataInternal(fileOverride)
       alert('Save File from older version, settings will not be loaded');
 
     await mainScript(baseTexture, waterTexture, wallTexture, precipitation);
-    void publishLanSharedSave(file);
   } catch (error) {
     console.error('The simulation save could not be loaded.', error);
     loadingBar?.remove();
@@ -5726,6 +5731,21 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     }
     // add functions to guicontrols object
     guiControls.download = function() { prepareDownload(); };
+    guiControls.share = async function() {
+      if (!window.WEATHER_SAVE_RELAY_URL) {
+        alert('Save sharing is not configured for this site.');
+        return;
+      }
+
+      try {
+        const saveBlob = await createSaveFileBlob();
+        const filename = (saveFileName || 'weather-sandbox') + '.weathersandbox';
+        await publishLanSharedSave(new File([saveBlob], filename, {type : 'application/x-binary'}));
+      } catch (error) {
+        console.error('Could not create a save to share.', error);
+        alert('Could not create a save to share: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    };
 
     guiControls.resetSettings = function() {
       if (confirm('Are you sure you want to reset all settings to default?')) {
@@ -6699,6 +6719,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     pauseController = datGui.add(guiControls, 'paused').onChange(handlePause).name('Paused').listen();
     datGui.add(guiControls, 'download').name('Save Simulation to File');
+    datGui.add(guiControls, 'share').name('Share Simulation with Device');
     datGui.domElement.querySelectorAll('.cr.boolean .c input[type="checkbox"]').forEach(function(checkbox) {
       const icon = document.createElement('span');
       icon.className = 'gui-heroicon-check';

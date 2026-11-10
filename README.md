@@ -158,7 +158,7 @@ console.log(weather.simulationTime, weather.stations[0]?.airTemperatureC);
 
 ## Automatically sharing saves between devices
 
-The GitHub Pages app can automatically make a loaded save available to devices on the same public IP address. Save files are stored on your own always-on Proxmox machine; a Cloudflare Worker provides the HTTPS front door and IP-based discovery. This setup does not use Cloudflare R2 or `lan_weather_server.py`.
+The GitHub Pages app can share a snapshot of the current simulation with devices on the same public IP address. Save files are stored on your own always-on Proxmox machine; a Cloudflare Worker provides the HTTPS front door and IP-based discovery. This setup does not use Cloudflare R2 or `lan_weather_server.py`.
 
 ### Set up the Proxmox relay
 
@@ -212,7 +212,7 @@ The GitHub Pages app can automatically make a loaded save available to devices o
 
    Wrangler prints its `workers.dev` URL. Put that URL in `save-relay-config.js` as `window.WEATHER_SAVE_RELAY_URL = 'https://your-worker.your-subdomain.workers.dev';`, then deploy the updated site to GitHub Pages.
 
-After setup, loading a save on the PC asks whether you want to share that save. If you agree, it uploads through the Worker to your Proxmox machine and displays a random access code. A phone using the app on the same Wi-Fi (or the same VPN egress) discovers the **Load save from …** pill; selecting it requires entering that code. Keep the code private and share it only with devices you trust. Heartbeats and deleting a share require a separate owner key held only in the PC tab. Shares expire ten minutes after their last heartbeat and are removed from Proxmox storage automatically.
+After setup, load or create a simulation on the PC and choose **Share Simulation with Device** below **Save Simulation to File** in the dat.GUI controls. Sharing is opt-in; confirm the prompt to upload a snapshot of the current world through the Worker to your Proxmox machine. Copy the random access code shown and share it only with trusted devices. A phone using the app on the same Wi-Fi (or the same VPN egress) discovers the **Load save from …** pill; selecting it requires entering that code. Keep the PC tab open while sharing. Heartbeats and deleting a share require a separate owner key held only in that tab. Shares expire ten minutes after their last heartbeat and are removed from Proxmox storage automatically.
 
 Save files pass through Cloudflare's Worker but are not stored there; the Proxmox relay stores and serves them. Discovery is grouped by public IP, not by home network or account, so other people sharing that public IP can see active share filenames and device labels. They cannot download a save without its random access code. The Worker limits each public IP to 120 requests per minute and three uploads per minute (Cloudflare's limits are approximate); the relay also caps uploads at 90 MiB each, active data at 180 MiB per public IP, total stored save data at 1 GiB by default, active shares at ten per public IP, and network metadata to 10,000 active IP groups. Configure `RELAY_MAX_STORAGE_BYTES` in the VM's `.env` to change the disk quota. Do not load sensitive saves while sharing a public IP with untrusted users. Browsers do not reveal a computer's actual hostname to websites, so the pill uses a platform label such as “Windows PC” instead of a custom PC name. Cloudflare Workers and Tailscale Funnel have service limits that may change; review their current plan limits before relying on them.
 
