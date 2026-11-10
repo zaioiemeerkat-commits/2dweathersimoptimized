@@ -61,6 +61,52 @@
             border-left: 0 !important;
         }
 
+        .dg.ac .dg.main li.share-simulation-row .c {
+            align-items: center;
+            box-sizing: border-box;
+            display: flex;
+            gap: 7px;
+        }
+
+        .dg.ac .dg.main li.share-simulation-row .c .button {
+            flex: 1 1 0;
+            min-width: 0;
+            width: auto;
+        }
+
+        .dg.ac .dg.main li.share-simulation-row .c .button.is-busy {
+            cursor: progress;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .dg.ac .dg.main .share-simulation-progress {
+            color: rgba(255, 255, 255, 0.8);
+            flex: 0 0 30px;
+            font-size: 10px !important;
+            line-height: 1;
+            opacity: 0;
+            pointer-events: none;
+            text-align: right;
+            transform: translateX(3px);
+            transition: opacity 180ms ease, transform 180ms ease, visibility 0s linear 180ms;
+            visibility: hidden;
+            white-space: nowrap;
+        }
+
+        .dg.ac .dg.main .share-simulation-progress.is-visible {
+            opacity: 1;
+            transform: translateX(0);
+            transition-delay: 0s;
+            visibility: visible;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .dg.ac .dg.main .share-simulation-progress {
+                transition-duration: 0.01ms;
+            }
+        }
+
         .dg.ac .dg.main .c input[type="text"] {
             font-family: "Roboto", sans-serif !important;
             font-size: 12px !important;
@@ -577,7 +623,7 @@
         }
 
         @media (max-width: 600px) {
-            .simulation-clock {
+            html.mobile-user-agent .simulation-clock {
                 align-items: center;
                 background: transparent;
                 border: 0;
@@ -592,28 +638,28 @@
                 top: 0;
             }
 
-            .simulation-clock-left {
+            html.mobile-user-agent .simulation-clock-left {
                 display: block;
             }
 
-            .simulation-clock-primary {
+            html.mobile-user-agent .simulation-clock-primary {
                 align-items: baseline;
                 gap: 6px;
             }
 
-            .simulation-clock-time,
-            .simulation-clock-date {
+            html.mobile-user-agent .simulation-clock-time,
+            html.mobile-user-agent .simulation-clock-date {
                 font-size: 14px;
             }
 
-            .simulation-clock-right {
+            html.mobile-user-agent .simulation-clock-right {
                 display: grid;
                 gap: 1px;
                 justify-items: end;
                 min-width: 0;
             }
 
-            .simulation-clock-detail {
+            html.mobile-user-agent .simulation-clock-detail {
                 font-size: 11px;
                 gap: 4px;
                 justify-content: flex-end;
@@ -623,22 +669,22 @@
                 white-space: nowrap;
             }
 
-            .simulation-clock-event-icon {
+            html.mobile-user-agent .simulation-clock-event-icon {
                 flex: 0 0 14px;
                 height: 14px;
                 width: 14px;
             }
 
-            .simulation-clock-solar-event {
+            html.mobile-user-agent .simulation-clock-solar-event {
                 overflow: hidden;
                 text-overflow: ellipsis;
             }
 
-            .simulation-clock-solar-countdown {
+            html.mobile-user-agent .simulation-clock-solar-countdown {
                 flex: 0 0 auto;
             }
 
-            .simulation-clock-fps {
+            html.mobile-user-agent .simulation-clock-fps {
                 gap: 4px;
             }
         }
@@ -696,7 +742,7 @@
         }
 
         @media (max-width: 600px) and (orientation: portrait) {
-            .app-version {
+            html.mobile-user-agent .app-version {
                 bottom: auto;
                 left: 12px;
                 top: calc(env(safe-area-inset-top, 0px) + 62px);
@@ -1016,7 +1062,7 @@
         }
 
         @media (max-width: 600px) {
-            .dg.ac {
+            html.mobile-user-agent .dg.ac {
                 height: 0 !important;
                 max-width: none;
                 right: 0 !important;
@@ -1024,7 +1070,7 @@
                 width: auto !important;
             }
 
-            .dg.ac .dg.main {
+            html.mobile-user-agent .dg.ac .dg.main {
                 bottom: max(8px, env(safe-area-inset-bottom));
                 border-radius: 12px;
                 left: 0;
@@ -1044,31 +1090,31 @@
                     width 280ms cubic-bezier(0.2, 0.75, 0.25, 1);
             }
 
-            .dg.ac .dg.main.is-dragging {
+            html.mobile-user-agent .dg.ac .dg.main.is-dragging {
                 transition: none;
             }
 
             @supports (height: 100svh) {
-                .dg.ac .dg.main {
+                html.mobile-user-agent .dg.ac .dg.main {
                     height: min(80svh, 680px) !important;
                 }
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="half"] {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="half"] {
                 height: min(48vh, 420px) !important;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="full"] {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] {
                 height: var(--mobile-gui-full-height, auto) !important;
                 max-height: min(80vh, 680px) !important;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] {
                 height: 104px !important;
                 border-radius: 12px;
             }
 
-            .dg.ac .dg.main .mobile-gui-handle {
+            html.mobile-user-agent .dg.ac .dg.main .mobile-gui-handle {
                 align-items: flex-start;
                 appearance: none;
                 -webkit-appearance: none;
@@ -1086,11 +1132,11 @@
                 width: 100%;
             }
 
-            .dg.ac .dg.main .mobile-gui-handle:active {
+            html.mobile-user-agent .dg.ac .dg.main .mobile-gui-handle:active {
                 cursor: grabbing;
             }
 
-            .dg.ac .dg.main .mobile-gui-handle::before {
+            html.mobile-user-agent .dg.ac .dg.main .mobile-gui-handle::before {
                 background: rgba(255, 255, 255, 0.55);
                 border-radius: 999px;
                 content: "";
@@ -1098,12 +1144,12 @@
                 width: 38px;
             }
 
-            .dg.ac .dg.main .mobile-gui-handle:focus-visible {
+            html.mobile-user-agent .dg.ac .dg.main .mobile-gui-handle:focus-visible {
                 outline: 2px solid rgba(255, 255, 255, 0.8);
                 outline-offset: -4px;
             }
 
-            .dg.ac .dg.main > .mobile-quick-dock {
+            html.mobile-user-agent .dg.ac .dg.main > .mobile-quick-dock {
                 align-items: center;
                 background: rgba(0, 0, 0, 0.18);
                 border-top: 1px solid rgba(255, 255, 255, 0.12);
@@ -1128,7 +1174,7 @@
                 isolation: isolate;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] > .mobile-quick-dock {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] > .mobile-quick-dock {
                 opacity: 1;
                 pointer-events: auto;
                 transform: translateY(0);
@@ -1136,7 +1182,7 @@
                 visibility: visible;
             }
 
-            .dg.ac .dg.main > ul {
+            html.mobile-user-agent .dg.ac .dg.main > ul {
                 flex: 0 1 auto;
                 opacity: 1;
                 transform: translateY(0);
@@ -1145,11 +1191,11 @@
                 visibility: visible;
             }
 
-            .dg.ac .dg.main > .close-button.close-bottom {
+            html.mobile-user-agent .dg.ac .dg.main > .close-button.close-bottom {
                 display: none !important;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] > ul {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] > ul {
                 opacity: 0;
                 pointer-events: none;
                 transform: translateY(12px);
@@ -1157,7 +1203,7 @@
                 visibility: hidden;
             }
 
-            .dg.ac .dg.main.is-content-visible > ul {
+            html.mobile-user-agent .dg.ac .dg.main.is-content-visible > ul {
                 opacity: 1;
                 pointer-events: auto;
                 transform: translateY(0);
@@ -1166,25 +1212,25 @@
             }
 
             @supports (height: 100svh) {
-                .dg.ac .dg.main[data-mobile-ui-state="half"] {
+                html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="half"] {
                     height: min(48svh, 420px) !important;
                 }
 
-                .dg.ac .dg.main[data-mobile-ui-state="full"] {
+                html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] {
                     height: var(--mobile-gui-full-height, auto) !important;
                     max-height: min(80svh, 680px) !important;
                 }
             }
 
-            .dg.ac .dg.main li.title,
-            .dg.ac .dg.main .cr {
+            html.mobile-user-agent .dg.ac .dg.main li.title,
+            html.mobile-user-agent .dg.ac .dg.main .cr {
                 box-sizing: border-box;
                 height: 44px;
                 line-height: 44px !important;
                 min-height: 44px;
             }
 
-            .dg.ac .dg.main .property-name {
+            html.mobile-user-agent .dg.ac .dg.main .property-name {
                 box-sizing: border-box;
                 color: #fff !important;
                 height: 44px;
@@ -1194,47 +1240,47 @@
                 white-space: nowrap;
             }
 
-            .dg.ac .dg.main ul.closed > li:not(.title),
-            .dg.ac .dg.main ul.closed > li:not(.title) > *,
-            .dg.ac .dg.main li.wind-push-strength-collapsed {
+            html.mobile-user-agent .dg.ac .dg.main ul.closed > li:not(.title),
+            html.mobile-user-agent .dg.ac .dg.main ul.closed > li:not(.title) > *,
+            html.mobile-user-agent .dg.ac .dg.main li.wind-push-strength-collapsed {
                 min-height: 0 !important;
             }
 
-            .dg.ac .dg.main ul:not(.closed) > li:not(.title) {
+            html.mobile-user-agent .dg.ac .dg.main ul:not(.closed) > li:not(.title) {
                 transition-duration: 280ms;
                 transition-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
             }
 
-            .dg.ac .dg.main li.title::before {
+            html.mobile-user-agent .dg.ac .dg.main li.title::before {
                 top: 18px;
             }
 
-            .dg.ac .dg.main .cr.boolean .c {
+            html.mobile-user-agent .dg.ac .dg.main .cr.boolean .c {
                 height: 44px;
                 width: 48px;
             }
 
-            .dg.ac .dg.main .cr .c {
+            html.mobile-user-agent .dg.ac .dg.main .cr .c {
                 box-sizing: border-box;
                 min-width: 0;
             }
 
-            .dg.ac .dg.main .c select {
+            html.mobile-user-agent .dg.ac .dg.main .c select {
                 min-height: 34px;
             }
 
-            .dg.ac .dg.main > ul {
+            html.mobile-user-agent .dg.ac .dg.main > ul {
                 -webkit-overflow-scrolling: touch;
                 overscroll-behavior: contain;
             }
 
-            .dg.ac .dg.main > .close-button.close-bottom {
+            html.mobile-user-agent .dg.ac .dg.main > .close-button.close-bottom {
                 min-height: 44px;
             }
         }
 
         @media (max-width: 1024px) and (max-height: 600px) and (orientation: landscape) {
-            .dg.ac {
+            html.mobile-user-agent .dg.ac {
                 height: 0 !important;
                 max-width: none;
                 right: 0 !important;
@@ -1242,7 +1288,7 @@
                 width: auto !important;
             }
 
-            .dg.ac .dg.main {
+            html.mobile-user-agent .dg.ac .dg.main {
                 align-items: stretch;
                 border-radius: 12px 0 0 12px;
                 bottom: 0;
@@ -1261,11 +1307,11 @@
                 animation: mobile-dat-gui-landscape-enter 320ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
             }
 
-            .dg.ac .dg.main.is-dragging {
+            html.mobile-user-agent .dg.ac .dg.main.is-dragging {
                 transition: none;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="full"] {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] {
                 height: var(--mobile-gui-landscape-height, auto) !important;
                 margin-bottom: auto;
                 margin-top: auto;
@@ -1273,13 +1319,13 @@
                 width: min(82vw, 420px) !important;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] {
                 height: 100vh !important;
                 max-height: 100vh;
                 transform: translateX(calc(100% - 56px));
             }
 
-            .dg.ac > .mobile-gui-handle {
+            html.mobile-user-agent .dg.ac > .mobile-gui-handle {
                 align-items: center;
                 appearance: none;
                 box-sizing: border-box;
@@ -1307,15 +1353,15 @@
                 visibility: visible;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] ~ .mobile-gui-handle {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] ~ .mobile-gui-handle {
                 --mobile-gui-offset: calc(min(82vw, 420px) - 56px);
             }
 
-            .dg.ac .dg.main.is-dragging ~ .mobile-gui-handle {
+            html.mobile-user-agent .dg.ac .dg.main.is-dragging ~ .mobile-gui-handle {
                 transition: none;
             }
 
-            .dg.ac > .mobile-gui-handle::before {
+            html.mobile-user-agent .dg.ac > .mobile-gui-handle::before {
                 background: rgba(255, 255, 255, 0.55);
                 border-radius: 999px;
                 content: "";
@@ -1323,15 +1369,15 @@
                 width: 4px;
             }
 
-            .dg.ac > .mobile-gui-handle::after {
+            html.mobile-user-agent .dg.ac > .mobile-gui-handle::after {
                 display: none;
             }
 
-            .dg.ac > .mobile-gui-handle:active {
+            html.mobile-user-agent .dg.ac > .mobile-gui-handle:active {
                 background: transparent;
             }
 
-            .dg.ac .dg.main > .mobile-quick-dock {
+            html.mobile-user-agent .dg.ac .dg.main > .mobile-quick-dock {
                 align-items: center;
                 background: rgba(18, 25, 35, 0.18);
                 border-right: 1px solid rgba(255, 255, 255, 0.12);
@@ -1357,7 +1403,7 @@
                 isolation: isolate;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] > .mobile-quick-dock {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] > .mobile-quick-dock {
                 opacity: 1;
                 pointer-events: auto;
                 transform: translateX(0);
@@ -1365,11 +1411,11 @@
                 visibility: visible;
             }
 
-            .dg.ac .dg.main.is-dragging ~ .mobile-gui-handle {
+            html.mobile-user-agent .dg.ac .dg.main.is-dragging ~ .mobile-gui-handle {
                 cursor: grabbing;
             }
 
-            .dg.ac .dg.main > ul {
+            html.mobile-user-agent .dg.ac .dg.main > ul {
                 flex: 1 1 auto;
                 height: auto !important;
                 min-width: 0;
@@ -1384,7 +1430,7 @@
                 visibility: visible;
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="none"] > ul {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] > ul {
                 opacity: 0;
                 pointer-events: none;
                 transform: translateX(12px);
@@ -1392,7 +1438,7 @@
                 visibility: hidden;
             }
 
-            .dg.ac .dg.main.is-content-visible > ul {
+            html.mobile-user-agent .dg.ac .dg.main.is-content-visible > ul {
                 opacity: 1;
                 pointer-events: auto;
                 transform: translateX(0);
@@ -1401,22 +1447,22 @@
             }
 
             @supports (height: 100dvh) {
-                .dg.ac .dg.main[data-mobile-ui-state="none"] {
+                html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="none"] {
                     height: 100dvh !important;
                     max-height: 100dvh;
                 }
 
-                .dg.ac .dg.main[data-mobile-ui-state="full"] {
+                html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] {
                     max-height: 100dvh;
                 }
             }
 
-            .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
+            html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
                 max-height: 100vh;
             }
 
             @supports (height: 100dvh) {
-                .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
+                html.mobile-user-agent .dg.ac .dg.main[data-mobile-ui-state="full"] > ul {
                     max-height: 100dvh;
                 }
             }
@@ -1914,20 +1960,20 @@
         }
 
         @media (max-width: 600px) {
-            .main-menu-setup table,
-            .main-menu-setup tbody,
-            .main-menu-setup tr,
-            .main-menu-setup td {
+            html.mobile-user-agent .main-menu-setup table,
+            html.mobile-user-agent .main-menu-setup tbody,
+            html.mobile-user-agent .main-menu-setup tr,
+            html.mobile-user-agent .main-menu-setup td {
                 display: block;
                 width: auto !important;
             }
 
-            .main-menu-setup table td {
+            html.mobile-user-agent .main-menu-setup table td {
                 border: 0;
                 padding: 5px 2px;
             }
 
-            .main-menu-setup table tr {
+            html.mobile-user-agent .main-menu-setup table tr {
                 border-bottom: 1px solid rgba(255, 255, 255, 0.1);
                 padding: 8px 0;
             }

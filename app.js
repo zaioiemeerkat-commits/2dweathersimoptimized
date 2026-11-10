@@ -9,7 +9,21 @@ details. You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-if (window.matchMedia('(pointer: coarse) and (hover: none), (max-width: 600px)').matches) {
+const isMobileUserAgent = navigator.userAgentData?.mobile === true ||
+  /Android|iPhone|iPad|iPod|Mobile|Windows Phone|IEMobile|BlackBerry|Opera Mini/i.test(navigator.userAgent) ||
+  (navigator.platform == 'MacIntel' && navigator.maxTouchPoints > 1);
+
+if (isMobileUserAgent)
+  document.documentElement.classList.add('mobile-user-agent');
+
+function isMobileAdaptedViewport()
+{
+  return window.matchMedia(
+    '(max-width: 600px), (max-width: 1024px) and (max-height: 600px) and (orientation: landscape)'
+  ).matches;
+}
+
+if (isMobileUserAgent) {
   let fullscreenRequestPending = false;
   let fullscreenButton;
 
@@ -41,7 +55,7 @@ if (window.matchMedia('(pointer: coarse) and (hover: none), (max-width: 600px)')
   };
 
   const requestMobileFullscreen = function() {
-    if (document.fullscreenElement || fullscreenRequestPending)
+    if (!isMobileAdaptedViewport() || document.fullscreenElement || fullscreenRequestPending)
       return;
 
     const root = document.documentElement;
@@ -98,8 +112,7 @@ function getEstimatedSimulationCapacity()
 
 function isMobileSetupDevice()
 {
-  return window.matchMedia('(pointer: coarse)').matches ||
-    window.matchMedia('(max-width: 768px)').matches;
+  return isMobileUserAgent;
 }
 
 function getMobileSimulationLimitError(cellCount)
@@ -2354,6 +2367,92 @@ function createSaveRelayKey()
 let activeLanSharedSaveId = null;
 let activeLanSharedSaveOwnerKey = null;
 let lanSharedSaveHeartbeat;
+const SAVE_RELAY_UPLOAD_TIMEOUT_MS = 20 * 60 * 1000;
+let saveShareProgressElement = null;
+let saveShareProgressHideTimer = null;
+let shareSimulationInProgress = false;
+
+function setShareSimulationBusy(isBusy)
+{
+  const shareButton = document.querySelector('.share-simulation-row .button');
+  if (!shareButton)
+    return;
+
+  shareButton.setAttribute('aria-disabled', String(isBusy));
+  shareButton.classList.toggle('is-busy', isBusy);
+}
+
+function updateSaveShareProgress(percent)
+{
+  if (!saveShareProgressElement)
+    return;
+
+  window.clearTimeout(saveShareProgressHideTimer);
+  saveShareProgressHideTimer = null;
+  const progress = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : 0;
+  saveShareProgressElement.textContent = `${progress}%`;
+  saveShareProgressElement.setAttribute('aria-valuenow', String(progress));
+  saveShareProgressElement.setAttribute('aria-hidden', 'false');
+  saveShareProgressElement.classList.add('is-visible');
+}
+
+function hideSaveShareProgress()
+{
+  if (!saveShareProgressElement)
+    return;
+
+  window.clearTimeout(saveShareProgressHideTimer);
+  saveShareProgressHideTimer = window.setTimeout(() => {
+    saveShareProgressElement.classList.remove('is-visible');
+    saveShareProgressElement.setAttribute('aria-hidden', 'true');
+    saveShareProgressHideTimer = null;
+  }, 350);
+}
+
+function uploadLanSharedSave(url, file, readKey, ownerKey)
+{
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    try {
+      request.open('POST', url);
+      request.timeout = SAVE_RELAY_UPLOAD_TIMEOUT_MS;
+      request.setRequestHeader('Content-Type', 'application/octet-stream');
+      request.setRequestHeader('X-Upload-Length', String(file.size));
+      request.setRequestHeader('X-Share-Read-Key', readKey);
+      request.setRequestHeader('X-Share-Owner-Key', ownerKey);
+      request.upload.addEventListener('progress', event => {
+        if (event.lengthComputable && Number.isFinite(event.loaded) &&
+            Number.isFinite(event.total) && event.total > 0)
+          updateSaveShareProgress(event.loaded / event.total * 100);
+      });
+      request.addEventListener('load', () => {
+        updateSaveShareProgress(100);
+        hideSaveShareProgress();
+        resolve({
+          ok: request.status >= 200 && request.status < 300,
+          status: request.status,
+          responseText: request.responseText
+        });
+      });
+      request.addEventListener('error', () => {
+        hideSaveShareProgress();
+        reject(new Error('Network error while uploading the save.'));
+      });
+      request.addEventListener('timeout', () => {
+        hideSaveShareProgress();
+        reject(new Error('Save relay upload timed out after 20 minutes. Check the connection and try again.'));
+      });
+      request.addEventListener('abort', () => {
+        hideSaveShareProgress();
+        reject(new Error('Save relay upload was cancelled.'));
+      });
+      request.send(file);
+    } catch (error) {
+      hideSaveShareProgress();
+      reject(error);
+    }
+  });
+}
 
 async function stopLanSharedSave()
 {
@@ -2385,8 +2484,6 @@ async function publishLanSharedSave(file)
   if (!relayUrl)
     return;
 
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 30000);
   try {
     if (!window.confirm(
       'Share this save with other devices on your public IP? Anyone who also has the access code can download it. ' +
@@ -2398,18 +2495,14 @@ async function publishLanSharedSave(file)
     const readKey = createSaveRelayKey();
     const ownerKey = createSaveRelayKey();
     const url = `${relayUrl}/api/shares?name=${encodeURIComponent(file.name)}&device=${encodeURIComponent(getSaveRelayDeviceLabel())}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Upload-Length': String(file.size),
-        'X-Share-Read-Key': readKey,
-        'X-Share-Owner-Key': ownerKey
-      },
-      body: file,
-      signal: controller.signal
-    });
-    const responseText = await response.text();
+    updateSaveShareProgress(0);
+    let response;
+    try {
+      response = await uploadLanSharedSave(url, file, readKey, ownerKey);
+    } finally {
+      hideSaveShareProgress();
+    }
+    const responseText = response.responseText;
     let result;
     if (responseText) {
       try {
@@ -2456,8 +2549,6 @@ async function publishLanSharedSave(file)
   } catch (error) {
     console.error('Could not share this save. Check the save relay setup.', error);
     alert('Could not share this save: ' + (error instanceof Error ? error.message : String(error)));
-  } finally {
-    window.clearTimeout(timeout);
   }
 }
 
@@ -2740,6 +2831,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 {
   let sliderGradientObserver;
   let mobileGuiHandleCleanup = null;
+  let mobileGuiModeChangeCleanup = null;
   let hapticsTooltipCleanup = null;
   let loadedShaderCount = 0;
   const totalShaderCount = 30;
@@ -5245,7 +5337,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
   function setupMobileGuiHandle(gui, toolController)
   {
     const landscapeQuery = window.matchMedia('(max-width: 1024px) and (max-height: 600px) and (orientation: landscape)');
-    if (!window.matchMedia('(max-width: 600px)').matches && !landscapeQuery.matches)
+    if (!isMobileUserAgent || (!window.matchMedia('(max-width: 600px)').matches && !landscapeQuery.matches))
       return null;
 
     const main = gui.domElement;
@@ -5765,6 +5857,12 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
         landscapeQuery.removeEventListener('change', updateHandleOrientation);
       else if (typeof landscapeQuery.removeListener == 'function')
         landscapeQuery.removeListener(updateHandleOrientation);
+      if (closeButton)
+        closeButton.hidden = false;
+      controlsList.removeAttribute('id');
+      delete main.dataset.mobileUiState;
+      main.classList.remove('is-content-visible', 'is-dragging');
+      main.style.removeProperty('--mobile-gui-landscape-height');
       handle.remove();
     };
   }
@@ -5779,6 +5877,10 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     if (mobileGuiHandleCleanup) {
       mobileGuiHandleCleanup();
       mobileGuiHandleCleanup = null;
+    }
+    if (mobileGuiModeChangeCleanup) {
+      mobileGuiModeChangeCleanup();
+      mobileGuiModeChangeCleanup = null;
     }
 
     if (sliderGradientObserver)
@@ -5830,11 +5932,15 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
     // add functions to guicontrols object
     guiControls.download = function() { prepareDownload(); };
     guiControls.share = async function() {
+      if (shareSimulationInProgress)
+        return;
       if (!window.WEATHER_SAVE_RELAY_URL) {
         alert('Save sharing is not configured for this site.');
         return;
       }
 
+      shareSimulationInProgress = true;
+      setShareSimulationBusy(true);
       try {
         const saveBlob = await createSaveFileBlob();
         const filename = (saveFileName || 'weather-sandbox') + '.weathersandbox';
@@ -5842,6 +5948,9 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       } catch (error) {
         console.error('Could not create a save to share.', error);
         alert('Could not create a save to share: ' + (error instanceof Error ? error.message : String(error)));
+      } finally {
+        shareSimulationInProgress = false;
+        setShareSimulationBusy(false);
       }
     };
     guiControls.toggleFullscreen = async function() {
@@ -6764,10 +6873,7 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       }
     });
 
-    const mobileHapticsQuery = window.matchMedia(
-      '(max-width: 600px), (max-width: 1024px) and (max-height: 600px) and (orientation: landscape)'
-    );
-    if (mobileHapticsQuery.matches) {
+    if (isMobileUserAgent) {
       const hapticsController = advanced_folder.add(guiControls, 'haptics')
         .name('Toggle Haptics');
       const hapticsRow = hapticsController.domElement.closest('.cr');
@@ -6835,7 +6941,24 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
 
     pauseController = datGui.add(guiControls, 'paused').onChange(handlePause).name('Paused').listen();
     datGui.add(guiControls, 'download').name('Save Simulation to File');
-    datGui.add(guiControls, 'share').name('Share Simulation with Device');
+    const shareController = datGui.add(guiControls, 'share').name('Share Simulation with Device');
+    const shareRow = shareController.domElement.closest('.cr');
+    const shareContainer = shareRow?.querySelector('.c');
+    if (shareRow && shareContainer) {
+      shareRow.classList.add('share-simulation-row');
+      saveShareProgressElement = document.createElement('span');
+      saveShareProgressElement.className = 'share-simulation-progress';
+      saveShareProgressElement.setAttribute('role', 'progressbar');
+      saveShareProgressElement.setAttribute('aria-label', 'Save upload progress');
+      saveShareProgressElement.setAttribute('aria-valuemin', '0');
+      saveShareProgressElement.setAttribute('aria-valuemax', '100');
+      saveShareProgressElement.setAttribute('aria-valuenow', '0');
+      saveShareProgressElement.setAttribute('aria-hidden', 'true');
+      saveShareProgressElement.textContent = '0%';
+      shareContainer.querySelector('.button')?.setAttribute('aria-label', 'Share Simulation with Device');
+      shareContainer.append(saveShareProgressElement);
+      setShareSimulationBusy(shareSimulationInProgress);
+    }
     datGui.add(guiControls, 'toggleFullscreen').name('Toggle Fullscreen');
     datGui.domElement.querySelectorAll('.cr.boolean .c input[type="checkbox"]').forEach(function(checkbox) {
       const icon = document.createElement('span');
@@ -6858,7 +6981,24 @@ async function mainScript(initialBaseTex, initialWaterTex, initialWallTex, initi
       checkbox.insertAdjacentElement('afterend', icon);
     });
     datGui.width = 400;
-    mobileGuiHandleCleanup = setupMobileGuiHandle(datGui, toolController);
+    function updateMobileGuiMode()
+    {
+      if (!isMobileUserAgent)
+        return;
+      if (isMobileAdaptedViewport() && !mobileGuiHandleCleanup)
+        mobileGuiHandleCleanup = setupMobileGuiHandle(datGui, toolController);
+      else if (!isMobileAdaptedViewport() && mobileGuiHandleCleanup) {
+        mobileGuiHandleCleanup();
+        mobileGuiHandleCleanup = null;
+      }
+    }
+    updateMobileGuiMode();
+    window.addEventListener('resize', updateMobileGuiMode);
+    window.addEventListener('orientationchange', updateMobileGuiMode);
+    mobileGuiModeChangeCleanup = function() {
+      window.removeEventListener('resize', updateMobileGuiMode);
+      window.removeEventListener('orientationchange', updateMobileGuiMode);
+    };
 
     setupDropdownWheelSelection();
 
